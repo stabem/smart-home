@@ -12,7 +12,9 @@ house, without opening a phone app and without unlinking anything from Smart Lif
 - **Gabriel** — only user, on his Windows 11 PC on the home Wi-Fi.
 - **Tuya devices** — lamps and smart switches (Smart Life). Controlled over the LAN with the Tuya
   local protocol (3.3/3.4/3.5) using each device's local key.
-- **Tuya IoT Cloud** — used once (and on "Refresh devices") to read device ids, local keys and rooms.
+- **Tuya cloud via Smart Life login** — used once (and on "Buscar dispositivos"): the user types the
+  Smart Life *User Code* and scans a QR code with the Smart Life app (same flow as Home Assistant's
+  `tuya-device-sharing-sdk`). Reads device ids, local keys and rooms. No iot.tuya.com account.
 - **LG ThinQ Connect API** — official cloud API, personal access token (PAT), for the 3 ACs.
 
 ## Rooms
@@ -34,13 +36,14 @@ house, without opening a phone app and without unlinking anything from Smart Lif
    color/white-temperature picker (only where the device supports it).
 3. **control-ac** — Popup → room with AC → AC card like the reference: room temperature, power
    button, target temp (− / slider 16–30 / +), Modo, Ventilação, Turbo toggle, "Atualizado" status.
-4. **first-setup** — First run with no config → "Configurar" screen: status of `.env` (LG token,
-   Tuya keys) → "Buscar dispositivos" → devices listed per room → "Salvar".
+4. **first-setup** — First run with no config → "Configurar" screen: LG token status, Smart Life
+   User Code field → QR code to scan in Smart Life → "Buscar dispositivos" → devices listed per
+   room → "Salvar".
 
 Screens: tray popup (room list), room screen, setup screen.
 
 ## Risks
-- Secrets: LG PAT, Tuya access secret, device local keys. Kept in `.env` and an OS-encrypted store
+- Secrets: LG PAT, Smart Life session, device local keys. Kept in `.env` and an OS-encrypted store
   (Electron `safeStorage`); never committed, never logged.
 - Wrong command to AC is reversible (user can switch it back). No money, no personal data.
 - Device on unreachable IP → show "offline", never hang the UI.
@@ -49,7 +52,7 @@ Screens: tray popup (room list), room screen, setup screen.
 Scenes, schedules, voice, phone/remote access, non-Tuya/non-LG devices, multi-user.
 
 ## Stack
-Electron + TypeScript, `tuyapi`-style local protocol client, LG ThinQ Connect REST.
+Electron + TypeScript, Tuya local protocol client, LG ThinQ Connect REST.
 Runs at Windows login, tray only (no taskbar window), all child processes hidden.
 
 ## v1 done
