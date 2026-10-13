@@ -32,6 +32,7 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
   let configured = fixture === 'house'
   let found: Room[] | null = null
   let launchAtLogin = false
+  let smartLifeConnected = fixture === 'house' && (typeof location === 'undefined' || new URLSearchParams(location.search).get('session') !== 'missing')
   return {
     async getRooms() { return structuredClone(rooms) },
     async sendCommand(command: DeviceCommand) {
@@ -54,8 +55,9 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
     },
     async getLaunchAtLogin() { return launchAtLogin },
     async setLaunchAtLogin(enabled) { launchAtLogin = enabled },
-    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured, smartLifeUserCodeConfigured: false } },
+    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured, smartLifeUserCodeConfigured: false, smartLifeConnected } },
     async beginSmartLifeLogin() { return 'tuyaSmart--qrLogin?token=fixture-only' },
+    async reconnectSmartLife() { smartLifeConnected = true },
     async discoverDevices() {
       found = [...houseRooms(), { id: 'lg:Sem cômodo', name: 'Sem cômodo', lights: [], acs: [{ id: 'ac-unmatched', name: 'Bedroom AC', state: { on: false, targetTemperature: 23, online: false } }] }]
       return structuredClone(found)

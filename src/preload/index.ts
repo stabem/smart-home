@@ -8,6 +8,7 @@ const api: SmartHomeApi = {
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('login:set', enabled),
   getSetupStatus: () => ipcRenderer.invoke('setup:status'),
   beginSmartLifeLogin: (userCode) => ipcRenderer.invoke('setup:login', userCode),
+  reconnectSmartLife: () => ipcRenderer.invoke('setup:reconnect'),
   discoverDevices: () => ipcRenderer.invoke('setup:discover'),
   saveSetup: (acRoomIds) => ipcRenderer.invoke('setup:save', acRoomIds)
 }

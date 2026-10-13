@@ -1,20 +1,24 @@
 {
-  "promise": "Issue #22: solicited Tuya 3.5 devices are discovered on UDP 7000; address resolution finishes within eight seconds even with slow open hosts; cloud light changes are shown as online only after a successful status read.",
+  "issue": 24,
+  "promise": "Tuya 3.5 LAN negotiation accepts authenticated 6699 replies; failures identify the device without secrets; a missing or expired Smart Life session can be reconnected and renewed without losing saved room assignments.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/home.ts",
-    "src/main/tuya/cloud.ts",
-    "src/main/tuya/discovery.ts",
-    "src/main/tuya/index.ts",
-    "src/main/tuya/probe.ts",
     "src/main/tuya/protocol.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/cloud.ts",
     "src/main/tuya/tuya.test.ts",
+    "src/main/home.ts",
+    "src/main/home.test.ts",
+    "src/main/index.ts",
+    "src/preload/index.ts",
+    "src/shared/types.ts",
     "src/renderer/App.tsx",
-    "src/shared/types.ts"
+    "src/renderer/style.css",
+    "src/renderer/fixtures/index.ts",
+    "src/renderer/fixtures/index.test.ts",
+    "tests/fixture.spec.ts",
+    "playwright.config.ts"
   ],
-  "proof": "npx vitest run src/main/tuya/tuya.test.ts && sh ci/local-ci.sh",
-  "journeys": [
-    "tray-toggle-room-lights",
-    "tray-adjust-light"
-  ]
+  "proof": "npm test -- src/main/tuya/tuya.test.ts src/main/home.test.ts src/renderer/fixtures/index.test.ts; SMART_HOME_TEST_PORT=5184 npx playwright test tests/fixture.spec.ts; sh ci/local-ci.sh",
+  "journeys": ["first-setup"]
 }
