@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { DeviceCommand, Room, SmartHomeApi } from '../shared/types'
 
+type AppearanceCommand =
+  | { kind: 'light.color'; deviceId: string; color: string }
+  | { kind: 'light.temperature'; deviceId: string; temperature: number }
+
 export function App({ api }: { api: SmartHomeApi }) {
   const [rooms, setRooms] = useState<Room[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -12,8 +16,8 @@ export function App({ api }: { api: SmartHomeApi }) {
   async function refresh() { setRooms(await api.getRooms()) }
   useEffect(() => { void api.getRooms().then(setRooms); void api.getLaunchAtLogin().then(setLogin) }, [api])
 
-  async function command(value: DeviceCommand) {
-    try { setError(''); await api.sendCommand(value); await refresh() }
+  async function command(value: DeviceCommand | AppearanceCommand) {
+    try { setError(''); await api.sendCommand(value as DeviceCommand); await refresh() }
     catch { setError('Não foi possível atualizar o dispositivo.') }
   }
 
@@ -33,7 +37,16 @@ export function App({ api }: { api: SmartHomeApi }) {
       <div className="cardHead"><strong>{light.name}</strong><button role="switch" aria-label={light.name} aria-checked={light.state.on} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}>{light.state.on ? 'Ligada' : 'Desligada'}</button></div>
       <label>Brilho <input type="range" aria-label="Brilho" min="1" max="100" value={light.state.brightness ?? 100} onChange={(event) => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /></label>
       <button aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor</button>
-      {colorFor === light.id && <p className="muted" role="status">Controle de cor ainda não disponível para este dispositivo.</p>}
+      {colorFor === light.id && <div className="appearance">
+        {light.state.color !== undefined && <>
+          <label>Cor <input type="color" aria-label="Escolher cor" value={light.state.color} onChange={(event) => void command({ kind: 'light.color', deviceId: light.id, color: event.target.value })} /></label>
+          <span role="status" aria-label="Cor atual">{light.state.color}</span>
+        </>}
+        {light.state.temperature !== undefined && <label>Temperatura da luz
+          <input type="range" aria-label="Temperatura da luz" min="0" max="100" value={light.state.temperature} onChange={(event) => void command({ kind: 'light.temperature', deviceId: light.id, temperature: Number(event.target.value) })} />
+        </label>}
+        {light.state.color === undefined && light.state.temperature === undefined && <p className="muted" role="status">Controle de cor ainda não disponível para este dispositivo.</p>}
+      </div>}
     </section>)}
     {room.ac && <section className="card">
       <div className="cardHead"><strong>Ar condicionado</strong><button aria-label={room.ac.state.on ? 'Desligar ar' : 'Ligar ar'} onClick={() => void command({ kind: 'ac.power', deviceId: room.ac!.id, on: !room.ac!.state.on })}>{room.ac.state.on ? 'Ligado' : 'Desligado'}</button></div>

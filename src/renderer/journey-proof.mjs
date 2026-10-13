@@ -6,13 +6,15 @@ import { chromium } from '@playwright/test'
 import { createServer } from 'vite'
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
-const server = await createServer({ configFile: resolve(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 5173, strictPort: true } })
+const server = await createServer({ configFile: resolve(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: true } })
 let browser
 try {
   await server.listen()
+  const address = server.httpServer?.address()
+  assert.ok(address && typeof address !== 'string')
   browser = await chromium.launch({ headless: true })
   const page = await browser.newPage()
-  const url = 'http://127.0.0.1:5173/?fixture=house'
+  const url = `http://127.0.0.1:${address.port}/?fixture=house`
 
   await page.goto(url)
   await page.getByRole('heading', { name: 'Casa' }).waitFor()
@@ -29,10 +31,17 @@ try {
   assert.equal(await page.getByRole('switch', { name: 'Luz do quarto' }).getAttribute('aria-checked'), 'true')
   await page.getByRole('slider', { name: 'Brilho' }).fill('55')
   await page.getByRole('button', { name: 'Cor' }).click()
-  await page.getByText('Controle de cor ainda não disponível para este dispositivo.').waitFor()
+  await page.getByLabel('Escolher cor').fill('#ff0000')
+  await page.getByRole('status', { name: 'Cor atual' }).getByText('#ff0000').waitFor()
+  await page.getByRole('slider', { name: 'Temperatura da luz' }).fill('65')
+  assert.equal(await page.getByRole('slider', { name: 'Temperatura da luz' }).inputValue(), '65')
   await page.getByRole('button', { name: 'Voltar' }).click()
   await page.getByRole('heading', { name: 'Casa' }).waitFor()
-  process.stdout.write('tray-adjust-light: passed (color unavailable in current command contract)\n')
+  await page.getByRole('button', { name: 'Abrir Quarto' }).click()
+  await page.getByRole('button', { name: 'Cor' }).click()
+  assert.equal(await page.getByLabel('Escolher cor').inputValue(), '#ff0000')
+  assert.equal(await page.getByRole('slider', { name: 'Temperatura da luz' }).inputValue(), '65')
+  process.stdout.write('tray-adjust-light: passed (color and white temperature reflected)\n')
 
   await page.goto(url)
   await page.getByRole('button', { name: 'Abrir Office' }).click()
