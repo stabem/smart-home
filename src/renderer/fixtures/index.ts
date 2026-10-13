@@ -1,4 +1,5 @@
 import type { DeviceCommand, Room, SmartHomeApi } from '../../shared/types'
+import { applyLightGroups, suggestLightGroups } from '../../main/light-groups'
 
 const names = ['Entrada', 'Cozinha', 'Mesa de jantar', 'Sala de estar', 'Banheiro', 'Banheiro da suíte', 'Office', 'Quarto']
 const acRooms = new Set(['Sala de estar', 'Office', 'Quarto'])
@@ -21,7 +22,7 @@ export function houseRooms(): Room[] {
   const office = rooms.find(room => room.name === 'Office')!
   office.lights = [
     { id: 'office-switch', name: 'Luz Office', switchOnly: true, state: { on: false, online: true } },
-    ...[1, 2, 3, 4].map(number => ({ id: `office-bulb-${number}`, name: `Lâmpada Office ${number}`, state: { on: false, brightness: 70, online: true } }))
+    ...[1, 2, 3, 4].map(number => ({ id: `office-bulb-${number}`, name: `Office_${number}`, state: { on: false, brightness: 70, color: '#ffe0ae', temperature: 50, online: true } }))
   ]
   rooms.find(room => room.name === 'Quarto')!.lights.push({ id: 'office-switch::2', name: 'Cortineiro', switchOnly: true, state: { on: false, online: true } })
   return rooms
@@ -29,13 +30,20 @@ export function houseRooms(): Room[] {
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
   const rooms = fixture === 'house' ? houseRooms() : []
+  let groups = suggestLightGroups(rooms)
   let configured = fixture === 'house'
   let found: Room[] | null = null
   let launchAtLogin = false
   let smartLifeConnected = fixture === 'house' && (typeof location === 'undefined' || new URLSearchParams(location.search).get('session') !== 'missing')
+  let syncGuard = true
   return {
-    async getRooms() { return structuredClone(rooms) },
+    async getRooms() { const copy = structuredClone(rooms); return applyLightGroups(copy, groups) },
     async sendCommand(command: DeviceCommand) {
+      const group = groups.find(item => item.id === command.deviceId)
+      if (group && command.kind.startsWith('light.')) {
+        await Promise.all(group.memberIds.map(deviceId => this.sendCommand({ ...command, deviceId })))
+        return
+      }
       const appearance = command as DeviceCommand | { kind: 'light.color'; deviceId: string; color: string } | { kind: 'light.temperature'; deviceId: string; temperature: number }
       for (const room of rooms) {
         const light = room.lights.find((item) => item.id === command.deviceId)
@@ -55,14 +63,17 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
     },
     async getLaunchAtLogin() { return launchAtLogin },
     async setLaunchAtLogin(enabled) { launchAtLogin = enabled },
-    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured, smartLifeUserCodeConfigured: false, smartLifeConnected } },
+    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured, smartLifeUserCodeConfigured: false, smartLifeConnected, syncGuard } },
+    async setSyncGuard(enabled) { syncGuard = enabled },
+    async getGroupSetup() { return { rooms: structuredClone(rooms), groups: structuredClone(groups) } },
+    async saveLightGroups(value) { groups = structuredClone(value) },
     async beginSmartLifeLogin() { return 'tuyaSmart--qrLogin?token=fixture-only' },
     async reconnectSmartLife() { smartLifeConnected = true },
     async discoverDevices() {
       found = [...houseRooms(), { id: 'lg:Sem cômodo', name: 'Sem cômodo', lights: [], acs: [{ id: 'ac-unmatched', name: 'Bedroom AC', state: { on: false, targetTemperature: 23, online: false } }] }]
       return structuredClone(found)
     },
-    async saveSetup(acRoomIds) {
+    async saveSetup(acRoomIds, selectedGroups) {
       if (!found) throw new Error('Busque dispositivos antes de salvar')
       const saved = structuredClone(found)
       for (const room of saved) room.acs = room.acs.filter(ac => (acRoomIds[ac.id] || room.id) === room.id)
@@ -76,6 +87,7 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
         if (target && target.id !== source.id) target.lights.push(structuredClone(light))
       }
       rooms.push(...saved.filter(room => room.lights.length || room.acs.length))
+      groups = selectedGroups ?? suggestLightGroups(rooms)
       configured = true
     }
   }

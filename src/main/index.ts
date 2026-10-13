@@ -55,7 +55,10 @@ app.whenReady().then(() => {
   ipcMain.handle('setup:login', (_event, userCode: unknown) => home.beginLogin(userCode))
   ipcMain.handle('setup:reconnect', () => home.reconnectSmartLife())
   ipcMain.handle('setup:discover', () => home.discover())
-  ipcMain.handle('setup:save', (_event, acRoomIds: unknown) => home.save(acRoomIds))
+  ipcMain.handle('setup:save', (_event, acRoomIds: unknown, groups: unknown) => home.save(acRoomIds, groups))
+  ipcMain.handle('groups:sync-guard', (_event, enabled: unknown) => home.setSyncGuard(enabled))
+  ipcMain.handle('groups:get', () => home.groupSetup())
+  ipcMain.handle('groups:save', (_event, groups: unknown) => home.saveLightGroups(groups))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
   ipcMain.handle('login:set', (_event, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid login setting')

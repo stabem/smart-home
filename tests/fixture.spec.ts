@@ -20,3 +20,16 @@ test('missing Smart Life session shows reconnect and keeps rooms after QR flow',
   await expect(page.getByRole('region', { name: 'Smart Life desconectado' })).toHaveCount(0)
   await expect(page.getByRole('list', { name: 'Cômodos' }).getByRole('listitem')).toHaveCount(8)
 })
+
+test('moving one track bulb to another room keeps the remaining group savable', async ({ page }) => {
+  await page.goto('/?fixture=empty')
+  await page.getByRole('button', { name: 'Buscar dispositivos' }).click()
+  await page.getByRole('combobox', { name: 'Cômodo de Office_4' }).selectOption({ label: 'Quarto' })
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Casa' })).toBeVisible()
+  await page.getByRole('button', { name: 'Abrir Office' }).click()
+  await expect(page.getByText('3 lâmpadas')).toBeVisible()
+  await page.getByRole('button', { name: 'Voltar' }).click()
+  await page.getByRole('button', { name: 'Abrir Quarto' }).click()
+  await expect(page.getByRole('switch', { name: 'Office_4' })).toBeVisible()
+})
