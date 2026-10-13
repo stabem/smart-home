@@ -1,94 +1,28 @@
 # Design — Smart Home Tray
 
-Source of truth for the look: the owner's interior project (light oak, off-white plaster, graphite
-metal, concrete grey, warm 2700 K light). The widget should feel like a scale model of the
-apartment, not a generic dashboard.
+The tray popup should feel like a small macOS Sonoma widget or Control Center panel: quiet, precise and useful at a glance. The apartment's light oak, pale plaster and graphite palette supplies warmth without drawing an illustration of the home.
 
-## Tokens
+## Window and surface
 
-| Token | Light (day) | Dark (night) | Use |
-|---|---|---|---|
-| `--plaster` | `#EEEBE5` | `#1F1E1C` | background |
-| `--plaster-2` | `#F7F5F1` | `#2A2826` | raised surfaces |
-| `--oak` | `#C8A47E` | `#B08D66` | wood accents, selected room, sliders |
-| `--graphite` | `#2A2A2C` | `#ECE8E1` | text, icons, frames |
-| `--concrete` | `#B8B4AD` | `#5A5650` | walls in the 3D model, borders |
-| `--glow` | `#FFD69A` | `#FFC874` | light ON (room floor glow, toggles) |
-| `--air` | `#86BFE6` | `#7AB6E0` | AC ON (cool ripple, AC controls) |
-| `--alert` | `#B4462F` | `#E07A60` | offline / error only |
+- One 420 × 640 frameless, transparent Electron window. On Windows, request the native acrylic material. The renderer uses a translucent tint, 38 px backdrop blur, a 24 px radius, a hairline inner edge and one soft window shadow.
+- Follow the system light or dark appearance. When the OS requests reduced transparency, use an opaque surface with the same contrast. No visual content requires transparency to be understood.
+- Tiles and controls have subtle borders and their own translucent fill. Keep shadows on the outer panel only. Selected lights are warm; active AC is cool blue. Offline and errors use a restrained red.
+- Type is Switzer, bundled offline during installation. It has a close, calm rhythm to SF Pro. Use tight spacing for large temperatures and tabular numerals. Sentence case throughout.
 
-- Theme follows `prefers-color-scheme` (Windows theme). Contrast ≥ 4.5:1 for text; `--glow`/`--air`
-  are never used as text colour on `--plaster`.
-- Type: **Switzer** for UI and **Zodiak** for headings and temperatures (bundled offline; see `docs/CREDITS.md`).
-  Scale 12 / 14 / 16 / 20 / 28 / 44. Big temperature numerals: 44, tabular.
-  Sentence case everywhere. No all-caps labels.
-- Radius by hierarchy: popup 18, panels 14, controls 10, chips full. Shadows only on the popup.
+## Home
 
-## Layout (popup ~420 × 640, frameless, anchored to tray)
+The header says **Casa** and holds settings. A small status panel reports room and light counts with **Apagar tudo**. **Cômodos** is a compact two-column grid: all eight room tiles, including their light buttons and bottom padding, fit in the 420 × 640 popup. Each rounded room tile has an icon, name, live state and a separate light button. Tapping the tile opens its room; tapping the icon button switches the room lights. AC rooms show a large temperature. The accessible list is the grid itself, so keyboard and pointer users reach the same controls.
 
-```
-┌──────────────────────────────────────┐
-│ Casa                     21°C   ⚙    │  heading + outside/indoor temp + settings
-│ ┌──────────────────────────────────┐ │
-│ │   3D model of the apartment      │ │  the memorable element (≈ 260 px tall)
-│ │   rooms glow when lit, ripple    │ │
-│ │   when AC is on; click = select  │ │
-│ └──────────────────────────────────┘ │
-│ Cômodos (list, scrolls)              │  accessible mirror of the map
-│  Sala de estar   ●luz   ❄22°   [⏻]   │  "Luzes <Room>" toggle + "Abrir <Room>"
-│  Office ...                          │
-└──────────────────────────────────────┘
-Room view: camera flies to the room; panel slides up with light cards
-(switch, Brilho, Cor) and the AC card (reference tweet layout: room temp,
-power, − Temperatura +, Modo, Ventilação, Turbo, Atualizado). "Voltar" returns.
-```
+## Room
 
-Left-aligned text. The model and the list are always in sync (hover/focus a row highlights the room
-and vice versa).
+**Voltar** returns home. The room title leads directly into device panels. Light panels show a switch, a thick filled brightness slider, and **Cor**, which reveals the device's available color and white-temperature controls. AC panels show ambient and target temperatures, power, target slider, minus/plus, and compact **Modo**, **Ventilação**, **Turbo** controls. The current status remains visible as **Atualizado** or **Offline**.
 
-## 3D model
+The room view enters with a short, subtle transition. Reduced motion removes it. The bundled bulb and airflow Lottie assets play only while active; the home view schedules no animation frames while idle.
 
-- three.js (`three` npm, bundled). Orthographic camera with limited orbit (yaw ±30°). The selected
-  room gets a camera flight and the home view flies back out. Floors use oak planks, light stone tiles
-  or matte plaster. Cutaway walls have thickness and pale top edges. Furniture reflects each room's
-  function. Light ON = warm pendant and point light; AC ON = cool airflow arcs by the wall unit.
-  Offline = a small `--alert` dot.
-- `prefers-reduced-motion`: camera cuts immediately and airflow arcs stay still.
-- Canvas has `aria-hidden="true"`; the room list is the accessible control surface. Each room mesh
-  is also reachable by Tab through the list.
-- Fallback: if WebGL fails, render the same rooms as a flat SVG plan.
+## Setup and copy
 
-## Floor plan (metres, origin = top-left of the drawing, x right, y down)
+**Configurar** uses the same glass panel, clear connection statuses, User Code field, QR action, device search, room assignment and **Salvar**. Buttons name their action. Errors state which device failed and what to check.
 
-Derived from `DETALHAMENTO TECNICO - ANTEPROJETO.pdf` sheet 01 (1:100). Rectangles `x, y, w, h`.
-`room` = id used by the app (matches docs/PROJECT.md); `—` = drawn but has no devices.
+## Proof
 
-| Area on plan | room | x | y | w | h |
-|---|---|---|---|---|---|
-| Entrada (hall by the front door) | entrada | 0.0 | 4.7 | 1.2 | 1.5 |
-| Cozinha | cozinha | 1.2 | 3.1 | 3.8 | 3.0 |
-| Sala de jantar | mesa-de-jantar | 0.0 | 6.1 | 6.5 | 3.1 |
-| Sala de estar | sala-de-estar | 0.0 | 9.3 | 3.2 | 3.9 |
-| Home office | office | 3.3 | 9.3 | 3.2 | 3.9 |
-| Banho social | banheiro | 4.9 | 4.9 | 1.6 | 3.2 |
-| Closet | — | 6.5 | 4.9 | 3.2 | 3.2 |
-| Suíte | quarto | 6.6 | 8.6 | 3.1 | 4.6 |
-| Banho suíte | banheiro-da-suite | 5.1 | 13.3 | 2.8 | 2.0 |
-| Área de serviço | — | 5.0 | 1.7 | 1.6 | 3.1 |
-| Pets | — | 3.9 | 0.0 | 2.6 | 1.7 |
-| Varanda (estar/office) | — | 0.0 | 13.3 | 5.0 | 0.7 |
-| Varanda (suíte) | — | 7.9 | 13.3 | 1.7 | 0.7 |
-
-ACs sit on the outer wall of Sala de estar, Office and Suíte (y ≈ 13.0).
-Store this as data in `src/renderer/map/floorplan.ts`; never commit the source PDFs or renders.
-
-## Copy
-
-Buttons say what happens: "Ligar luzes", "Desligar ar", "Salvar". Errors say what broke and what to
-do: "Luz da cozinha não respondeu. Ela está ligada na tomada?" No apologies, no exclamation marks.
-
-## Assets and motion
-
-Fontshare Switzer and Zodiak, Iconoir line icons, and three LottieFiles animations are local. Sources
-and licenses are recorded in `docs/CREDITS.md`. The model renders on demand while idle. Active AC
-airflow may animate. Reduced motion shows a still frame and cuts directly to a room.
+Use the fixture URLs `/?fixture=house` and `/?fixture=empty` on a free local port. The approved journeys in `.graphhelm/journeys/` fix the headings, roles and accessible names. Save 420 × 640 light and dark screenshots on a soft wallpaper-like backdrop in `test-results/design/`. Check the home window fit, keyboard focus, reduced motion, contrast and axe.
