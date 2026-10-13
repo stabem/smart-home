@@ -1,13 +1,29 @@
 import { EventEmitter } from 'node:events'
 import type { Socket } from 'node:net'
+import type { Socket as UdpSocket } from 'node:dgram'
 import { describe, expect, it, vi } from 'vitest'
 import { SmartLifeCloud, type SmartLifeSession } from './cloud'
+import { discoverLan } from './discovery'
 import { TuyaService } from './index'
 import { decodeBroadcast, packFrame, udpKey, unpackFrame, TuyaLanClient, type LanDevice } from './protocol'
 
 const device: LanDevice = { id: 'light-1', ip: '192.168.1.20', localKey: 'abcdefghijklmnop', version: '3.3' }
 
 describe('Tuya LAN', () => {
+  it('contains a UDP error after bind instead of leaving an unhandled process error', async () => {
+    class FakeUdpSocket extends EventEmitter {
+      closed = false
+      bind(_port: number, _host: string, callback: () => void): void { callback() }
+      close(): void { this.closed = true }
+    }
+    const first = new FakeUdpSocket()
+    const sockets = [first, new FakeUdpSocket()]
+    const scan = discoverLan(10, () => sockets.shift() as unknown as UdpSocket)
+    queueMicrotask(() => first.emit('error', new Error('UDP failed')))
+    await expect(scan).resolves.toBeInstanceOf(Map)
+    expect(first.closed).toBe(true)
+  })
+
   it('reads legacy plaintext and authenticated 3.5 LAN announcements', () => {
     const announcement = Buffer.from('{"gwId":"light-1","ip":"192.168.1.20","version":"3.5"}')
     expect(decodeBroadcast(announcement)).toEqual({ id: 'light-1', ip: '192.168.1.20', version: '3.5' })
