@@ -89,7 +89,8 @@ export class HomeController {
     this.lgCountry = this.saved?.lgCountry || process.env.LG_COUNTRY || 'BR'
     this.lg = lg === undefined ? (this.lgPat ? new LgClient(this.lgPat, this.lgCountry) : null) : lg
     this.session = this.saved?.smartLifeSession || null
-    this.ready = this.saved ? this.tuya.restore(this.saved.homes) : Promise.resolve()
+    this.tuya.onAddressesChanged?.(homes => { if (this.saved?.homes === homes) this.store.save(this.saved) })
+    this.ready = this.saved ? this.tuya.restore(this.saved.homes, this.session) : Promise.resolve()
   }
 
   status(): SetupStatus {
