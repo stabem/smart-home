@@ -1,16 +1,25 @@
 {
-  "promise": "Fixture users see the apartment floor plan and calm light/dark room controls while all approved accessible journey names and actions keep working; keyboard, reduced motion, axe and WebGL fallback are observed.",
+  "promise": "The offline fixture shows a detailed 3D dollhouse with a room camera zoom, clear light switches and working AC mode, fan and turbo controls; approved journeys, keyboard, reduced motion, accessibility and WebGL fallback still work.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
+    "docs/DESIGN.md",
+    "docs/CREDITS.md",
     "src/renderer/App.tsx",
     "src/renderer/style.css",
-    "src/renderer/map/floorplan.ts",
     "src/renderer/map/ApartmentMap.tsx",
+    "src/renderer/map/floorplan.ts",
+    "src/renderer/assets/",
     "src/renderer/design-proof.mjs",
+    "src/renderer/journey-proof.mjs",
+    "src/renderer/fixtures/",
+    "src/shared/types.ts",
+    "src/preload/",
+    "src/main/home.ts",
+    "src/main/home.test.ts",
+    "src/main/lg/",
     "package.json",
     "package-lock.json",
     "tests/"
   ],
-  "journeys": ["tray-toggle-room-lights", "tray-adjust-light", "tray-control-ac", "tray-first-setup"],
   "proof": "node src/renderer/journey-proof.mjs && node src/renderer/design-proof.mjs && echo PROOF_OK"
 }

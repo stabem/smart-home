@@ -19,8 +19,8 @@ apartment, not a generic dashboard.
 
 - Theme follows `prefers-color-scheme` (Windows theme). Contrast ≥ 4.5:1 for text; `--glow`/`--air`
   are never used as text colour on `--plaster`.
-- Type: **Hanken Grotesk** (bundled via `@fontsource-variable/hanken-grotesk`, no network), one
-  family. Scale 12 / 14 / 16 / 20 / 28 / 44. Big temperature numerals: 44, weight 300, tabular.
+- Type: **Switzer** for UI and **Zodiak** for headings and temperatures (bundled offline; see `docs/CREDITS.md`).
+  Scale 12 / 14 / 16 / 20 / 28 / 44. Big temperature numerals: 44, tabular.
   Sentence case everywhere. No all-caps labels.
 - Radius by hierarchy: popup 18, panels 14, controls 10, chips full. Shadows only on the popup.
 
@@ -48,11 +48,12 @@ and vice versa).
 
 ## 3D model
 
-- three.js (`three` npm, bundled). Orthographic camera, isometric-ish (≈ 35° tilt, 45° yaw), limited
-  orbit (yaw ±30°), no free zoom. Floors are flat slabs in `--plaster-2`, walls extruded 0.35 units
-  in `--concrete`, oak floor in Sala/Office/Suíte. Light ON = emissive `--glow` floor + soft point
-  light; AC ON = slow `--air` ripple ring on the floor. Offline = desaturated with a small `--alert` dot.
-- `prefers-reduced-motion`: no camera flights (cut), no ripple animation (static ring).
+- three.js (`three` npm, bundled). Orthographic camera with limited orbit (yaw ±30°). The selected
+  room gets a camera flight and the home view flies back out. Floors use oak planks, light stone tiles
+  or matte plaster. Cutaway walls have thickness and pale top edges. Furniture reflects each room's
+  function. Light ON = warm pendant and point light; AC ON = cool airflow arcs by the wall unit.
+  Offline = a small `--alert` dot.
+- `prefers-reduced-motion`: camera cuts immediately and airflow arcs stay still.
 - Canvas has `aria-hidden="true"`; the room list is the accessible control surface. Each room mesh
   is also reachable by Tab through the list.
 - Fallback: if WebGL fails, render the same rooms as a flat SVG plan.
@@ -85,3 +86,9 @@ Store this as data in `src/renderer/map/floorplan.ts`; never commit the source P
 
 Buttons say what happens: "Ligar luzes", "Desligar ar", "Salvar". Errors say what broke and what to
 do: "Luz da cozinha não respondeu. Ela está ligada na tomada?" No apologies, no exclamation marks.
+
+## Assets and motion
+
+Fontshare Switzer and Zodiak, Iconoir line icons, and three LottieFiles animations are local. Sources
+and licenses are recorded in `docs/CREDITS.md`. The model renders on demand while idle. Active AC
+airflow may animate. Reduced motion shows a still frame and cuts directly to a room.

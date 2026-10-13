@@ -43,6 +43,9 @@ export type DeviceCommand =
   | { kind: 'light.temperature'; deviceId: string; temperature: number }
   | { kind: 'ac.power'; deviceId: string; on: boolean }
   | { kind: 'ac.temperature'; deviceId: string; temperature: number }
+  | { kind: 'ac.mode'; deviceId: string; mode: 'Resfriar' | 'Seco' | 'Ventilar' | 'Auto' }
+  | { kind: 'ac.fan'; deviceId: string; fan: 'Auto' | 'Baixa' | 'Média' | 'Alta' }
+  | { kind: 'ac.turbo'; deviceId: string; on: boolean }
 
 export interface SetupStatus {
   configured: boolean

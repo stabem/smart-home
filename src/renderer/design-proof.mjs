@@ -37,18 +37,62 @@ try {
     await page.getByRole('heading', { name: 'Casa' }).waitFor()
     await page.locator('canvas[aria-hidden="true"]').waitFor()
     await check('home')
+    const idleFrames = await page.evaluate(async () => {
+      let count = 0
+      const original = globalThis.requestAnimationFrame
+      globalThis.requestAnimationFrame = callback => { count++; return original(callback) }
+      await new Promise(resolve => globalThis.setTimeout(resolve, 1000))
+      globalThis.requestAnimationFrame = original
+      return count
+    })
+    assert.equal(idleFrames, 0, `${theme} idle home must not schedule frames with reduced motion`)
     await page.getByRole('button', { name: 'Abrir Sala de estar' }).click()
     await page.getByRole('heading', { name: 'Sala de estar' }).waitFor()
     await check('sala')
     await page.getByRole('button', { name: 'Voltar' }).click()
     await page.getByRole('button', { name: 'Abrir Office' }).click()
     await page.getByRole('heading', { name: 'Office' }).waitFor()
+    await page.getByRole('button', { name: 'Ligar ar' }).click()
+    await page.getByRole('button', { name: 'Desligar ar' }).waitFor()
     await check('office')
     await page.goto(`${base}/?fixture=empty`)
     await page.getByRole('heading', { name: 'Configurar' }).waitFor()
     await check('setup')
     await context.close()
   }
+  const idleContext = await browser.newContext({ viewport: { width: 420, height: 640 }, reducedMotion: 'no-preference' })
+  const idlePage = await idleContext.newPage()
+  await idlePage.goto(`${base}/?fixture=house`)
+  await idlePage.locator('canvas[aria-hidden="true"]').waitFor()
+  const normalIdleFrames = await idlePage.evaluate(async () => {
+    await new Promise(resolve => globalThis.setTimeout(resolve, 500))
+    let count = 0
+    const original = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = callback => { count++; return original(callback) }
+    await new Promise(resolve => globalThis.setTimeout(resolve, 1000))
+    globalThis.requestAnimationFrame = original
+    return count
+  })
+  assert.equal(normalIdleFrames, 0, 'idle home must not schedule frames without reduced motion')
+  await idlePage.evaluate(() => {
+    globalThis.__cameraFrames = 0
+    const original = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = callback => {
+      globalThis.__cameraFrames++
+      return original(callback)
+    }
+  })
+  await idlePage.getByRole('button', { name: 'Abrir Sala de estar' }).click()
+  await idlePage.getByRole('heading', { name: 'Sala de estar' }).waitFor()
+  await idlePage.waitForTimeout(250)
+  const zoomInFrames = await idlePage.evaluate(() => globalThis.__cameraFrames)
+  assert.ok(zoomInFrames > 2, 'selecting a room must animate the camera zoom')
+  await idlePage.getByRole('button', { name: 'Voltar' }).click()
+  await idlePage.getByRole('heading', { name: 'Casa' }).waitFor()
+  await idlePage.waitForTimeout(250)
+  const zoomOutFrames = await idlePage.evaluate(() => globalThis.__cameraFrames)
+  assert.ok(zoomOutFrames > zoomInFrames + 2, 'Voltar must animate the camera back out')
+  await idleContext.close()
   const context = await browser.newContext({ viewport: { width: 420, height: 640 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   await page.addInitScript(() => {
