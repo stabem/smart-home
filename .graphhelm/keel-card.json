@@ -1,0 +1,5 @@
+{
+  "promise": "Discover Smart Life lights and control supported Tuya DPS over LAN, returning offline within two seconds for unreachable devices without exposing keys.",
+  "scopePaths": ["src/main/tuya/**", ".graphhelm/keel-card.json"],
+  "proof": "npm run typecheck && npm run lint && npm run test -- src/main/tuya && echo PROOF_OK"
+}
