@@ -170,16 +170,26 @@ export function ApartmentMap(props: Props) {
       const tiled = ['cozinha', 'banheiro', 'banheiro-da-suite'].includes(area.room ?? '')
       if (!dim && room) {
         if (wood) {
-          const count = Math.ceil(area.w / .26)
+          const count = Math.ceil(area.w / .2)
           for (let i = 0; i < count; i++) {
-            const x = area.x + (i + .5) * area.w / count
-            box(group, x, .105, area.y + area.h / 2, area.w / count - .012, .025, area.h - .07, [oak, oakLight, oakDark][i % 3], false)
-            for (let row = 1; row < Math.ceil(area.h / 1.1); row++) box(group, x, .12, area.y + row * area.h / Math.ceil(area.h / 1.1), area.w / count - .02, .004, .012, oakDark, false)
+            const boardWidth = area.w / count
+            const x = area.x + (i + .5) * boardWidth
+            const offset = i % 2 === 0 ? 0 : .8
+            for (let start = area.y - offset; start < area.y + area.h; start += 1.6) {
+              const from = Math.max(start, area.y + .035)
+              const to = Math.min(start + 1.6, area.y + area.h - .035)
+              if (to > from + .02) box(group, x, .105, (from + to) / 2, boardWidth - .008, .025, to - from - .008, [oak, oakLight, oakDark][i % 3], false)
+            }
           }
         } else if (tiled) {
-          box(group, area.x + area.w / 2, .1, area.y + area.h / 2, area.w - .08, .025, area.h - .08, stone, false)
-          for (let x = area.x + .6; x < area.x + area.w; x += .6) box(group, x, .115, area.y + area.h / 2, .012, .004, area.h - .08, grout, false)
-          for (let z = area.y + .6; z < area.y + area.h; z += .6) box(group, area.x + area.w / 2, .115, z, area.w - .08, .004, .012, grout, false)
+          box(group, area.x + area.w / 2, .095, area.y + area.h / 2, area.w - .07, .01, area.h - .07, grout, false)
+          for (let x = area.x + .035; x < area.x + area.w - .035; x += .6) {
+            for (let z = area.y + .035; z < area.y + area.h - .035; z += .6) {
+              const width = Math.min(.6, area.x + area.w - .035 - x)
+              const depth = Math.min(.6, area.y + area.h - .035 - z)
+              box(group, x + width / 2, .108, z + depth / 2, width - .008, .025, depth - .008, stone, false)
+            }
+          }
         }
       }
       const wallMaterial = dim ? dimmed : !room ? muted : plaster
@@ -256,7 +266,7 @@ export function ApartmentMap(props: Props) {
         }
       }
       if (room && [...room.lights, ...room.acs].some(device => !device.state.online)) disk(group, area.x + area.w / 2, 1.17, area.y + area.h / 2, .08, .08, mat(color('--alert')))
-      label(group, area, dim || !room)
+      if (!props.selected || selected) label(group, area, !room)
     }
     const raycaster = new THREE.Raycaster()
     const mouse = new THREE.Vector2()

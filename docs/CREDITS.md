@@ -1,6 +1,6 @@
 ﻿# Credits
 
-All assets in this app are bundled for offline use. No runtime request to an asset host is needed.
+Assets are available offline after installation. Font binaries are downloaded directly from Fontshare during `npm ci` into the ignored `src/renderer/assets/fonts/` folder; they are never committed to this repository. If Fontshare is unavailable, installation succeeds with system-font fallbacks. The app makes no runtime request to an asset host.
 
 | Asset | Source | License | Use |
 |---|---|---|---|
@@ -11,4 +11,4 @@ All assets in this app are bundled for offline use. No runtime request to an ass
 | Airflow animation | [animation free on LottieFiles](https://lottiefiles.com/free-animation/wind-R4uGeQH3Js) | [Lottie Simple License](https://lottiefiles.com/page/license) | AC airflow feedback |
 | Loading animation | [LottieFiles](https://lottiefiles.com/free-animation/loading-zXKnUvIt1H) | [Lottie Simple License](https://lottiefiles.com/page/license) | Device scan |
 
-The Lottie animations remain subject to the Lottie Simple License when redistributed; its full text is included at `src/renderer/assets/lottie/LICENSE.md`. The Fontshare fonts are embedded for this app; anyone who uses the font files separately must obtain their own copy from Fontshare under its terms. The Iconoir icon files retain their MIT license.
+The Lottie animations remain subject to the Lottie Simple License when redistributed; its full text is included at `src/renderer/assets/lottie/LICENSE.md`. The Fontshare fonts are fetched by each installer from Fontshare's public CSS/CDN under its terms; anyone using the font files separately must obtain their own copy from Fontshare. The Iconoir icon files retain their MIT license.

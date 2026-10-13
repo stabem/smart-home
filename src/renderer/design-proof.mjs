@@ -25,9 +25,12 @@ try {
       await page.waitForFunction(expected => {
         const style = globalThis.getComputedStyle(globalThis.document.documentElement)
         const plaster = style.getPropertyValue('--plaster').trim().toLowerCase()
+        const ink = style.color
         return plaster === (expected === 'dark' ? '#1f1e1c' : '#eeebe5')
+          && ink === (expected === 'dark' ? 'rgb(236, 232, 225)' : 'rgb(42, 42, 44)')
       }, theme)
       await page.evaluate(() => globalThis.document.fonts.ready)
+      await page.evaluate(() => new Promise(resolve => globalThis.requestAnimationFrame(() => globalThis.requestAnimationFrame(resolve))))
       const result = await new AxeBuilder({ page }).analyze()
       const severe = result.violations.filter(item => ['serious', 'critical'].includes(item.impact))
       assert.deepEqual(severe.map(item => ({ id: item.id, nodes: item.nodes.map(node => node.target) })), [], `${theme} ${name}: axe`)
