@@ -10,3 +10,5 @@ devices.local.json
 .graphhelm/*
 !.graphhelm/journeys/
 /.mcp.json
+test-results/
+playwright-report/

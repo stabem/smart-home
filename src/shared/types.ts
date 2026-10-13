@@ -1,0 +1,50 @@
+export interface LightState {
+  on: boolean
+  brightness?: number
+  color?: string
+  temperature?: number
+  online: boolean
+}
+
+export interface AcState {
+  on: boolean
+  currentTemperature?: number
+  targetTemperature: number
+  mode?: string
+  fan?: string
+  turbo?: boolean
+  online: boolean
+  updatedAt?: string
+}
+
+export interface Light {
+  id: string
+  name: string
+  state: LightState
+}
+
+export interface AirConditioner {
+  id: string
+  name: string
+  state: AcState
+}
+
+export interface Room {
+  id: string
+  name: string
+  lights: Light[]
+  ac?: AirConditioner
+}
+
+export type DeviceCommand =
+  | { kind: 'light.power'; deviceId: string; on: boolean }
+  | { kind: 'light.brightness'; deviceId: string; brightness: number }
+  | { kind: 'ac.power'; deviceId: string; on: boolean }
+  | { kind: 'ac.temperature'; deviceId: string; temperature: number }
+
+export interface SmartHomeApi {
+  getRooms(): Promise<Room[]>
+  sendCommand(command: DeviceCommand): Promise<void>
+  getLaunchAtLogin(): Promise<boolean>
+  setLaunchAtLogin(enabled: boolean): Promise<void>
+}
