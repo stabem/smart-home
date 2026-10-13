@@ -25,7 +25,7 @@ function harness(initial: SavedSetup | null = null) {
 }
 
 describe('main process setup and control', () => {
-  afterEach(() => vi.unstubAllEnvs())
+  afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
   it('requires discovery before save and keeps local keys out of renderer rooms', async () => {
     const { home, store } = harness()
     expect(home.status().configured).toBe(false)
@@ -37,7 +37,7 @@ describe('main process setup and control', () => {
     expect(JSON.stringify(rooms)).not.toContain('fake-key')
     await home.save()
     expect(store.save).toHaveBeenCalledOnce()
-    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: !!process.env.USER_CODE_SMARTLIFE })
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true })
   })
 
   it('routes known device commands and rejects an offline light', async () => {
@@ -100,5 +100,61 @@ describe('main process setup and control', () => {
     expect(cloud.startLogin).toHaveBeenLastCalledWith('typed-code')
     expect(cloud.pollLogin).toHaveBeenLastCalledWith('fake-qr', 'typed-code')
     expect(JSON.stringify(home.status())).not.toContain('fallback-code')
+  })
+
+  it('saves LG and Smart Life credentials after discovery without returning them to the renderer', async () => {
+    vi.stubEnv('LG_PAT', 'fake-lg-pat')
+    vi.stubEnv('LG_COUNTRY', 'US')
+    const { home, store } = harness()
+    await home.beginLogin('fake-user-code')
+    const discovered = await home.discover()
+    await home.save()
+    expect(store.save.mock.calls[0][0]).toMatchObject({ lgPat: 'fake-lg-pat', lgCountry: 'US',
+      smartLifeUserCode: 'fake-user-code', smartLifeSession: session })
+    for (const secret of ['fake-lg-pat', 'fake-user-code', session.accessToken, session.refreshToken]) {
+      expect(JSON.stringify(discovered)).not.toContain(secret)
+      expect(JSON.stringify(home.status())).not.toContain(secret)
+    }
+  })
+
+  it('starts with saved credentials without environment and reads old files with environment fallback', async () => {
+    vi.stubEnv('LG_PAT', '')
+    vi.stubEnv('LG_COUNTRY', '')
+    vi.stubEnv('USER_CODE_SMARTLIFE', '')
+    const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+      expect(url).toContain('/state')
+      expect(options).toBeDefined()
+      return { ok: true, json: async () => ({ response: {
+        operation: { airConOperationMode: 'POWER_OFF' }, temperature: { targetTemperatureC: 23 }
+      } }) }
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const setup: SavedSetup = { homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }],
+      lgPat: 'saved-lg-pat', lgCountry: 'US', smartLifeUserCode: 'saved-user-code', smartLifeSession: session }
+    const { store, cloud, tuya } = harness(setup)
+    const home = new HomeController(store as unknown as SetupStore, cloud as unknown as SmartLifeCloud, tuya as unknown as TuyaService)
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true })
+    await home.rooms()
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({ authorization: 'Bearer saved-lg-pat', 'x-country': 'US' })
+    await home.beginLogin()
+    expect(cloud.startLogin).toHaveBeenCalledWith('saved-user-code')
+    vi.stubEnv('LG_PAT', 'dev-lg-pat')
+    vi.stubEnv('LG_COUNTRY', 'BR')
+    vi.stubEnv('USER_CODE_SMARTLIFE', 'dev-user-code')
+    const savedFirst = new HomeController(store as unknown as SetupStore, cloud as unknown as SmartLifeCloud,
+      tuya as unknown as TuyaService)
+    await savedFirst.rooms()
+    expect(fetcher.mock.calls[1]?.[1]?.headers).toMatchObject({ authorization: 'Bearer saved-lg-pat', 'x-country': 'US' })
+    await savedFirst.beginLogin()
+    expect(cloud.startLogin).toHaveBeenLastCalledWith('saved-user-code')
+    vi.stubEnv('LG_PAT', 'legacy-lg-pat')
+    vi.stubEnv('USER_CODE_SMARTLIFE', 'legacy-user-code')
+    const legacy = harness({ homes, acs: [] })
+    const oldHome = new HomeController(legacy.store as unknown as SetupStore, legacy.cloud as unknown as SmartLifeCloud,
+      legacy.tuya as unknown as TuyaService)
+    expect(oldHome.status().lgTokenConfigured).toBe(true)
+    await oldHome.beginLogin()
+    expect(legacy.cloud.startLogin).toHaveBeenCalledWith('legacy-user-code')
   })
 })
