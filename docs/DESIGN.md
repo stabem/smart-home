@@ -11,11 +11,11 @@ The tray popup should feel like a small macOS Sonoma widget or Control Center pa
 
 ## Home
 
-The header says **Casa** and holds settings. A small status panel reports room and light counts with **Apagar tudo**. **Cômodos** is a two-column grid. Each rounded room tile has an icon, name, live state and a separate light button. Tapping the tile opens its room; tapping the icon button switches the room lights. AC rooms show a large temperature. The accessible list is the grid itself, so keyboard and pointer users reach the same controls.
+The header says **Casa** and holds settings. A small status panel reports room and light counts with **Apagar tudo**. **Cômodos** is a compact two-column grid: all eight room tiles, including their light buttons and bottom padding, fit in the 420 × 640 popup. Each rounded room tile has an icon, name, live state and a separate light button. Tapping the tile opens its room; tapping the icon button switches the room lights. AC rooms show a large temperature. The accessible list is the grid itself, so keyboard and pointer users reach the same controls.
 
 ## Room
 
-**Voltar** returns home. The room title and small category strip lead into device panels. Light panels show a switch, a thick filled brightness slider, and **Cor**, which reveals the device's available color and white-temperature controls. AC panels show ambient and target temperatures, power, target slider, minus/plus, and compact **Modo**, **Ventilação**, **Turbo** controls. The current status remains visible as **Atualizado** or **Offline**.
+**Voltar** returns home. The room title leads directly into device panels. Light panels show a switch, a thick filled brightness slider, and **Cor**, which reveals the device's available color and white-temperature controls. AC panels show ambient and target temperatures, power, target slider, minus/plus, and compact **Modo**, **Ventilação**, **Turbo** controls. The current status remains visible as **Atualizado** or **Offline**.
 
 The room view enters with a short, subtle transition. Reduced motion removes it. The bundled bulb and airflow Lottie assets play only while active; the home view schedules no animation frames while idle.
 
@@ -25,4 +25,4 @@ The room view enters with a short, subtle transition. Reduced motion removes it.
 
 ## Proof
 
-Use the fixture URLs `/?fixture=house` and `/?fixture=empty` on a free local port. The approved journeys in `.graphhelm/journeys/` fix the headings, roles and accessible names. Save light and dark screenshots on a soft wallpaper-like backdrop in `test-results/design/`. Check keyboard focus, reduced motion, contrast and axe.
+Use the fixture URLs `/?fixture=house` and `/?fixture=empty` on a free local port. The approved journeys in `.graphhelm/journeys/` fix the headings, roles and accessible names. Save 420 × 640 light and dark screenshots on a soft wallpaper-like backdrop in `test-results/design/`. Check the home window fit, keyboard focus, reduced motion, contrast and axe.

@@ -25,9 +25,9 @@
 .homeSummary{min-height:62px;margin-bottom:14px}
 .sectionHeading{margin-bottom:8px}
 .rooms{gap:8px}
-.roomTile,.roomName{min-height:93px}
-.roomName{padding:10px 11px 28px}
-.tileIcon{width:27px;height:27px;margin-bottom:5px;border-radius:9px}
+.roomTile,.roomName{min-height:84px}
+.roomName{padding:8px 10px 21px}
+.tileIcon{width:24px;height:24px;margin-bottom:3px;border-radius:8px}
 .tileIcon .lineIcon{width:16px;height:16px}
 .roomLights{right:8px;bottom:7px;width:25px;height:25px}
 .tileTemperature{top:11px;right:11px;font-size:22px}

@@ -28,25 +28,35 @@ try {
   const base = `http://127.0.0.1:${address.port}`
   browser = await chromium.launch({ headless: true })
   for (const theme of ['light', 'dark']) {
-    const context = await browser.newContext({ viewport: { width: 900, height: 850 }, colorScheme: theme, reducedMotion: 'reduce' })
+    const context = await browser.newContext({ viewport: { width: 420, height: 640 }, colorScheme: theme, reducedMotion: 'reduce' })
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', error => errors.push(error.message))
     const visit = async fixture => {
       await page.goto(`${base}/?fixture=${fixture}`)
-      await page.addStyleTag({ content: `html,body,#root{min-height:100%}body{padding:50px 0;background:radial-gradient(circle at 16% 18%,#cfdae2 0,transparent 40%),radial-gradient(circle at 85% 78%,#d8b9af 0,transparent 42%),linear-gradient(135deg,#ece8e1,#c6d0d7 55%,#b8c2ca)}` })
+      await page.addStyleTag({ content: `html,body,#root{min-height:100%}body{background:radial-gradient(circle at 16% 18%,#cfdae2 0,transparent 40%),radial-gradient(circle at 85% 78%,#d8b9af 0,transparent 42%),linear-gradient(135deg,#ece8e1,#c6d0d7 55%,#b8c2ca)}` })
       await page.evaluate(() => globalThis.document.fonts.ready)
     }
     const capture = async name => {
       const result = await new AxeBuilder({ page }).analyze()
       assert.deepEqual(result.violations.filter(item => ['serious', 'critical'].includes(item.impact)).map(item => ({ id: item.id, nodes: item.nodes.map(node => ({ target: node.target, summary: node.failureSummary })) })), [], `${theme} ${name}: axe`)
-      await page.screenshot({ path: resolve(output, `${theme}-${name}.png`), fullPage: true })
+      await page.screenshot({ path: resolve(output, `${name === 'setup' ? 'setup' : `${theme}-${name}`}.png`), fullPage: false })
     }
     await visit('house')
     await page.getByRole('heading', { name: 'Casa' }).waitFor()
     assert.equal(await page.getByRole('list', { name: 'Cômodos' }).getByRole('listitem').count(), 8)
     await page.getByRole('button', { name: 'Luzes Sala de estar' }).click()
     await page.getByRole('status', { name: 'Sala de estar luzes ligadas' }).waitFor()
+    const homeFit = await page.evaluate(() => {
+      const shell = globalThis.document.querySelector('.homeScreen').getBoundingClientRect()
+      const tiles = [...globalThis.document.querySelectorAll('.roomTile')]
+      const buttons = [...globalThis.document.querySelectorAll('.roomLights')]
+      return { scrollHeight: globalThis.document.documentElement.scrollHeight, shellBottom: shell.bottom,
+        lastTileBottom: Math.max(...tiles.map(tile => tile.getBoundingClientRect().bottom)),
+        lastButtonBottom: Math.max(...buttons.map(button => button.getBoundingClientRect().bottom)) }
+    })
+    assert.ok(homeFit.scrollHeight <= 640 && homeFit.shellBottom <= 640 && homeFit.lastTileBottom <= 620 && homeFit.lastButtonBottom <= 620,
+      `${theme} home must fit the 420x640 popup with bottom breathing room: ${JSON.stringify(homeFit)}`)
     if (theme === 'light') {
       await capture('home')
       await page.getByRole('button', { name: 'Abrir Quarto' }).click()

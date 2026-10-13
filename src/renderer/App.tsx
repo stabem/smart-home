@@ -104,7 +104,6 @@ export function App({ api }: { api: SmartHomeApi }) {
   if (room) return <main className="shell roomScreen">
     <header className="topbar roomTopbar"><button className="back" onClick={() => { setSelected(null); setColorFor(null) }}><Icon src={backIcon} /> <span>Voltar</span></button><Icon src={homeIcon} className="topbarMark" /></header>
     <div className="roomTitle"><p className="overline">Cômodo</p><h1>{room.name}</h1><p>{room.lights.length} {room.lights.length === 1 ? 'luz' : 'luzes'}{room.acs.length ? ' · Ar-condicionado' : ''}</p></div>
-    <div className="roomHero" aria-hidden="true"><span className="heroIcon"><Icon src={room.acs.length ? airIcon : bulbIcon} /></span><span>{room.acs.length ? 'Clima e iluminação' : 'Iluminação'}</span></div>
     <div className="roomControls">
       {room.lights.map(light => <section className="devicePanel" key={light.id}>
         <div className="deviceHead"><div><span className="deviceIcon lightIcon" aria-hidden="true"><Icon src={bulbIcon} /><Motion src={bulbMotion} active={light.state.on} className="bulbMotion" /></span><strong>{light.name}</strong></div><button className="lightSwitch" role="switch" aria-label={light.name} aria-checked={light.state.online && light.state.on} disabled={!light.state.online} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}><Icon src={bulbIcon} className="lampSymbol" /><span className="switchTrack" aria-hidden="true"/><span>{!light.state.online ? 'Offline' : light.state.on ? 'Ligada' : 'Desligada'}</span></button></div>
@@ -133,7 +132,7 @@ export function App({ api }: { api: SmartHomeApi }) {
     <header className="topbar"><div><p className="overline">Minha casa</p><h1>Casa</h1></div><div className="topbarRight"><button className="settingsButton" aria-label="Configurações" aria-expanded={settings} onClick={() => setSettings(!settings)}><Icon src={settingsIcon} /></button></div></header>
     {settings && <div className="settingsPanel"><label><input type="checkbox" checked={login} onChange={event => { const enabled = event.target.checked; void api.setLaunchAtLogin(enabled).then(() => setLogin(enabled)) }} /> Iniciar com o Windows</label></div>}
     <div className="homeSummary"><div><span className="summaryIcon"><Icon src={homeIcon} /></span><p><strong>{rooms.length} cômodos</strong><span>{lightsOn ? `${lightsOn} ${lightsOn === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Tudo tranquilo por aqui'}</span></p></div><button className="allOff" disabled={!lightsOn} onClick={() => void turnOffAll()}>Apagar tudo</button></div>
-    <section className="roomListSection"><div className="sectionHeading"><h2>Cômodos</h2><span>{rooms.length} ambientes</span></div><ul aria-label="Cômodos" className="rooms">{rooms.map(item => {
+    <section className="roomListSection"><div className="sectionHeading"><h2>Cômodos</h2></div><ul aria-label="Cômodos" className="rooms">{rooms.map(item => {
       const online = item.lights.every(light => light.state.online)
       const on = item.lights.length > 0 && online && item.lights.every(light => light.state.on)
       const ac = item.acs[0]
