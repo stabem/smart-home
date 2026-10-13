@@ -21,6 +21,7 @@ function mockFetch(responses: Record<string, unknown>): typeof fetch {
 describe('ThinQ AC client', () => {
   it('lists only ACs and maps their state', async () => {
     const fetcher = mockFetch({
+      '/devices/ac-1/profile': profile,
       '/devices': [
         { deviceId: 'ac-1', deviceInfo: { alias: 'Office', deviceType: 'DEVICE_AIR_CONDITIONER' } },
         { deviceId: 'washer', deviceInfo: { deviceType: 'DEVICE_WASHER' } }
@@ -36,11 +37,56 @@ describe('ThinQ AC client', () => {
     expect(acs).toMatchObject([{ id: 'ac-1', name: 'Office', state: {
       on: true, currentTemperature: 27, targetTemperature: 23, mode: 'Resfriar', fan: 'Alta', online: true
     } }])
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher).toHaveBeenCalledTimes(3)
     expect(vi.mocked(fetcher).mock.calls[0][0]).toBe('https://api-aic.lgthinq.com/devices')
     expect(vi.mocked(fetcher).mock.calls[0][1]).toMatchObject({ headers: {
       authorization: 'Bearer test-token', 'x-country': 'BR', 'x-service-phase': 'OP'
     } })
+  })
+
+  it('uses a windStrengthDetail-only profile for fan state and control', async () => {
+    const detailProfile = { property: { airFlow: {
+      windStrengthDetail: { mode: ['r', 'w'], value: { w: ['NATURE', 'LOW', 'HIGH'] } }
+    } } }
+    const fetcher = mockFetch({
+      '/devices/ac-1/profile': detailProfile,
+      '/devices/ac-1/state': {
+        operation: { airConOperationMode: 'POWER_ON' },
+        temperatureInUnits: [{ unit: 'C', currentTemperature: 27, targetTemperature: 23 }],
+        airFlow: { windStrengthDetail: 'HIGH' }
+      },
+      '/devices/ac-1/control': {}
+    })
+    const client = new LgClient('test-token', 'BR', fetcher)
+    expect(await client.getAcState('ac-1')).toMatchObject({
+      on: true, currentTemperature: 27, targetTemperature: 23, fan: 'Alta'
+    })
+    await client.setAc('ac-1', { fan: 'Auto' })
+    expect(vi.mocked(fetcher).mock.calls.filter(call => new URL(String(call[0])).pathname.endsWith('/control'))
+      .map(call => JSON.parse(String(call[1]?.body)))).toEqual([
+        { airFlow: { windStrengthDetail: 'NATURE' } }
+      ])
+  })
+
+  it('prefers windStrengthDetail when the profile offers both fan properties', async () => {
+    const bothProfile = { property: { airFlow: {
+      windStrength: { mode: ['r', 'w'], value: { w: ['LOW'] } },
+      windStrengthDetail: { mode: ['r', 'w'], value: { w: ['HIGH'] } }
+    } } }
+    const fetcher = mockFetch({
+      '/devices/ac-1/profile': bothProfile,
+      '/devices/ac-1/state': {
+        operation: { airConOperationMode: 'POWER_ON' },
+        temperature: { targetTemperatureC: 23 },
+        airFlow: { windStrength: 'LOW', windStrengthDetail: 'HIGH' }
+      },
+      '/devices/ac-1/control': {}
+    })
+    const client = new LgClient('test-token', 'BR', fetcher)
+    expect((await client.getAcState('ac-1')).fan).toBe('Alta')
+    await client.setAc('ac-1', { fan: 'Alta' })
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls.at(-1)?.[1]?.body)))
+      .toEqual({ airFlow: { windStrengthDetail: 'HIGH' } })
   })
 
   it('keeps an unreachable AC in the list as offline', async () => {

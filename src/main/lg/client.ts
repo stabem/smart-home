@@ -49,6 +49,11 @@ function capability(profile: Json, group: string, key: string): Json {
   return entry
 }
 
+function fanKey(profile: Json): 'windStrengthDetail' | 'windStrength' {
+  const airFlow = object(object(profile.property ?? profile).airFlow)
+  return 'windStrengthDetail' in airFlow ? 'windStrengthDetail' : 'windStrength'
+}
+
 function validateValue(entry: Json, value: string | number | boolean): void {
   const writable = object(entry.value).w
   if (Array.isArray(writable) && !writable.includes(value)) throw new Error('LG AC value unsupported by profile')
@@ -113,19 +118,23 @@ export class LgClient {
 
   async getAcState(id: string): Promise<LgAcState> {
     const report = object(await this.request(`devices/${encodeURIComponent(id)}/state`))
-    const temp = object(report.temperature)
+    const celsius = Array.isArray(report.temperatureInUnits)
+      ? report.temperatureInUnits.find(item => object(item).unit === 'C') : undefined
+    const temp = celsius ? object(celsius) : object(report.temperature)
     const on = property(report, 'operation', 'airConOperationMode')
     const target = number(temp.targetTemperatureC ?? temp.targetTemperature)
     if (on !== 'POWER_ON' && on !== 'POWER_OFF') throw new Error('LG AC power state missing')
     if (target === undefined) throw new Error('LG AC target temperature missing')
     const mode = string(property(report, 'airConJobMode', 'currentJobMode'))
     const powerSave = property(report, 'powerSave', 'powerSaveEnabled')
+    const profile = report.airFlow ? await this.getAcProfile(id).catch(() => null) : null
+    const wind = profile ? string(property(report, 'airFlow', fanKey(profile))) : undefined
     return {
       on: on === 'POWER_ON',
       currentTemperature: number(temp.currentTemperatureC ?? temp.currentTemperature),
       targetTemperature: target,
       mode: mode ? modeNames[mode] ?? mode : undefined,
-      fan: (() => { const value = string(property(report, 'airFlow', 'windStrength')); return value ? fanNames[value] ?? value : undefined })(),
+      fan: wind ? fanNames[wind] ?? wind : undefined,
       turbo: mode === undefined ? undefined : mode === 'JET',
       powerSave: typeof powerSave === 'boolean' ? powerSave : undefined,
       online: true,
@@ -184,10 +193,11 @@ export class LgClient {
     }
     if (patch.fan !== undefined) {
       if (!fans[patch.fan]) throw new Error('LG AC fan invalid')
-      const entry = capability(profile, 'airFlow', 'windStrength')
+      const key = fanKey(profile)
+      const entry = capability(profile, 'airFlow', key)
       const supported = object(entry.value).w
       const value = patch.fan === 'Auto' && Array.isArray(supported) && !supported.includes('AUTO') && supported.includes('NATURE') ? 'NATURE' : fans[patch.fan]
-      add('airFlow', 'windStrength', value)
+      add('airFlow', key, value)
     }
     if (patch.turbo !== undefined) {
       if (patch.mode !== undefined) throw new Error('LG AC mode and turbo cannot be set together')
