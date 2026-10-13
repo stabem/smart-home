@@ -2,6 +2,8 @@ import type { AirConditioner, DeviceCommand, Room, SetupStatus } from '../shared
 import { LgClient } from './lg/client'
 import { SetupStore, type SavedSetup } from './store'
 import { SmartLifeCloud, TuyaService, type SmartLifeHome, type SmartLifeSession } from './tuya'
+import { applyLightGroups, suggestLightGroups, validateLightGroups } from './light-groups'
+import type { LightGroup, LightState } from '../shared/types'
 
 const acRoomNames = ['Sala de estar', 'Office', 'Quarto']
 const offlineAc = { on: false, targetTemperature: 23, online: false }
@@ -77,6 +79,7 @@ export class HomeController {
   private readonly lgCountry: string
   private readonly lg: LgClient | null
   private readonly ready: Promise<void>
+  private groupFailures: Record<string, string[]> = {}
 
   constructor(
     private readonly store = new SetupStore(),
@@ -97,7 +100,8 @@ export class HomeController {
     return { configured: this.saved !== null, lgTokenConfigured: this.lg !== null,
       tuyaKeysConfigured: !!this.saved?.homes.some(home => home.devices.some(device => !!device.localKey)),
       smartLifeUserCodeConfigured: !!(this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE),
-      smartLifeConnected: !!this.saved?.smartLifeSession && this.saved.smartLifeSession.expiresAt > Date.now() }
+      smartLifeConnected: !!this.saved?.smartLifeSession && this.saved.smartLifeSession.expiresAt > Date.now(),
+      syncGuard: this.saved?.syncGuard !== false }
   }
 
   async beginLogin(userCode?: unknown): Promise<string> {
@@ -138,7 +142,7 @@ export class HomeController {
     await this.tuya.restore(this.saved.homes, session)
   }
 
-  async save(assignments: unknown = {}): Promise<void> {
+  async save(assignments: unknown = {}, groups?: unknown): Promise<void> {
     if (!this.draft) throw new Error('Busque dispositivos antes de salvar')
     if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments)) throw new Error('Invalid room mapping')
     const mapping = assignments as Record<string, unknown>
@@ -150,6 +154,10 @@ export class HomeController {
     }
     this.draft.acRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validAcs.has(id))) as Record<string, string>
     this.draft.lightRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validLights.has(id))) as Record<string, string>
+    const assignedRooms = roomList(this.draft.homes, this.draft.acs, this.draft.acRoomIds, this.draft.lightRoomIds)
+    this.draft.lightGroups = validateLightGroups(groups ?? suggestLightGroups(assignedRooms), assignedRooms)
+    this.draft.groupLastState = {}
+    this.draft.syncGuard = true
     this.draft.lgPat = this.lgPat
     this.draft.lgCountry = this.lgCountry
     this.draft.smartLifeUserCode = this.loginUserCode || this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE
@@ -167,7 +175,48 @@ export class HomeController {
       ...room.lights.map(async light => { light.state = await this.tuya.getState(light.id) }),
       ...room.acs.map(ac => this.acState(ac))
     ]))
-    return rooms
+    const groups = this.groups(rooms)
+    if (this.saved.syncGuard !== false) await this.reapplyDrift(rooms, groups)
+    return applyLightGroups(rooms, groups, this.groupFailures)
+  }
+
+  private groups(rooms: Room[]): LightGroup[] {
+    return this.saved?.lightGroups ?? suggestLightGroups(rooms)
+  }
+
+  private async reapplyDrift(rooms: Room[], groups: LightGroup[]): Promise<void> {
+    for (const group of groups) {
+      const desired = this.saved?.groupLastState?.[group.id]
+      if (!desired) continue
+      const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
+      const patch = Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key))) as Partial<LightState>
+      const drifted = members.filter(light => light.state.online && Object.entries(patch).some(([key, value]) => light.state[key as keyof LightState] !== value))
+      const results = await Promise.allSettled(drifted.map(light => this.tuya.setLight(light.id, patch)))
+      this.groupFailures[group.id] = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [drifted[index].name] : [])
+      results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.online) drifted[index].state = result.value })
+    }
+  }
+
+  setSyncGuard(enabled: unknown): void {
+    if (typeof enabled !== 'boolean' || !this.saved) throw new Error('Invalid sync guard')
+    this.saved = { ...this.saved, syncGuard: enabled }
+    this.store.save(this.saved)
+  }
+
+  groupSetup(): { rooms: Room[]; groups: LightGroup[] } {
+    if (!this.saved) throw new Error('Configure devices first')
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
+    return { rooms, groups: this.groups(rooms) }
+  }
+
+  saveLightGroups(value: unknown): void {
+    if (!this.saved) throw new Error('Configure devices first')
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
+    const groups = validateLightGroups(value, rooms)
+    const ids = new Set(groups.map(group => group.id))
+    this.saved = { ...this.saved, lightGroups: groups,
+      groupLastState: Object.fromEntries(Object.entries(this.saved.groupLastState ?? {}).filter(([id]) => ids.has(id))) }
+    this.store.save(this.saved)
   }
 
   private async acState(ac: AirConditioner): Promise<void> {
@@ -188,6 +237,20 @@ export class HomeController {
           : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
       const state = await this.tuya.setLight(light.id, patch)
       if (!state.online) throw new Error('Device offline')
+      return
+    }
+    const group = this.groups(rooms).find(item => item.id === command.deviceId)
+    if (group && (command.kind === 'light.power' || command.kind === 'light.brightness' || command.kind === 'light.color' || command.kind === 'light.temperature')) {
+      const patch = command.kind === 'light.power' ? { on: command.on }
+        : command.kind === 'light.brightness' ? { brightness: command.brightness }
+          : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
+      const members = rooms.flatMap(room => room.lights).filter(item => group.memberIds.includes(item.id))
+      const results = await Promise.allSettled(members.map(member => this.tuya.setLight(member.id, patch)))
+      const failed = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [members[index].name] : [])
+      this.groupFailures[group.id] = failed
+      this.saved.groupLastState = { ...this.saved.groupLastState, [group.id]: { ...this.saved.groupLastState?.[group.id], ...patch } }
+      this.store.save(this.saved)
+      if (failed.length) throw new Error(`Falha em: ${failed.join(', ')}`)
       return
     }
     if (ac && this.lg && (command.kind === 'ac.power' || command.kind === 'ac.temperature' || command.kind === 'ac.mode' || command.kind === 'ac.fan' || command.kind === 'ac.turbo')) {

@@ -10,7 +10,10 @@ const api: SmartHomeApi = {
   beginSmartLifeLogin: (userCode) => ipcRenderer.invoke('setup:login', userCode),
   reconnectSmartLife: () => ipcRenderer.invoke('setup:reconnect'),
   discoverDevices: () => ipcRenderer.invoke('setup:discover'),
-  saveSetup: (acRoomIds) => ipcRenderer.invoke('setup:save', acRoomIds)
+  saveSetup: (acRoomIds, groups) => ipcRenderer.invoke('setup:save', acRoomIds, groups),
+  setSyncGuard: (enabled) => ipcRenderer.invoke('groups:sync-guard', enabled),
+  getGroupSetup: () => ipcRenderer.invoke('groups:get'),
+  saveLightGroups: (groups) => ipcRenderer.invoke('groups:save', groups)
 }
 
 contextBridge.exposeInMainWorld('api', api)
