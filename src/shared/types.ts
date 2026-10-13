@@ -5,6 +5,7 @@ export interface LightState {
   temperature?: number
   online: boolean
   viaCloud?: boolean
+  stale?: boolean
 }
 
 export interface AcState {
@@ -75,4 +76,5 @@ export interface SmartHomeApi {
   setSyncGuard(enabled: boolean): Promise<void>
   getGroupSetup(): Promise<{ rooms: Room[]; groups: LightGroup[] }>
   saveLightGroups(groups: LightGroup[]): Promise<void>
+  saveHomeEdits(assignments: Record<string, string>, names: Record<string, string>, groups: LightGroup[]): Promise<void>
 }

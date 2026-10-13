@@ -29,7 +29,7 @@ export function houseRooms(): Room[] {
 }
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
-  const rooms = fixture === 'house' ? houseRooms() : []
+  let rooms = fixture === 'house' ? houseRooms() : []
   let groups = suggestLightGroups(rooms)
   let configured = fixture === 'house'
   let found: Room[] | null = null
@@ -67,6 +67,20 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
     async setSyncGuard(enabled) { syncGuard = enabled },
     async getGroupSetup() { return { rooms: structuredClone(rooms), groups: structuredClone(groups) } },
     async saveLightGroups(value) { groups = structuredClone(value) },
+    async saveHomeEdits(assignments, names, value) {
+      const next = structuredClone(rooms)
+      const devices = rooms.flatMap(room => [...room.lights.map(light => ({ room: room.id, light })), ...room.acs.map(ac => ({ room: room.id, ac }))])
+      for (const room of next) { room.lights = []; room.acs = [] }
+      for (const device of devices) {
+        const id = 'light' in device ? device.light.id : device.ac.id
+        const target = next.find(room => room.id === (assignments[id] ?? device.room))
+        if (!target) throw new Error('Invalid room')
+        if ('light' in device) target.lights.push({ ...device.light, name: names[id] ?? device.light.name })
+        else target.acs.push(device.ac)
+      }
+      rooms = next
+      groups = structuredClone(value)
+    },
     async beginSmartLifeLogin() { return 'tuyaSmart--qrLogin?token=fixture-only' },
     async reconnectSmartLife() { smartLifeConnected = true },
     async discoverDevices() {

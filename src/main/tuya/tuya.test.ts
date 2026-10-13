@@ -3,7 +3,7 @@ import { createCipheriv } from 'node:crypto'
 import type { Socket } from 'node:net'
 import type { Socket as UdpSocket } from 'node:dgram'
 import { describe, expect, it, vi } from 'vitest'
-import { SmartLifeCloud, type SmartLifeSession } from './cloud'
+import { SmartLifeCloud, SmartLifeRateLimitError, SmartLifeRequestQueue, type SmartLifeSession } from './cloud'
 import { discoverLan } from './discovery'
 import { localSubnets, probeTcp } from './probe'
 import { TuyaService } from './index'
@@ -148,6 +148,16 @@ describe('Tuya LAN', () => {
     expect(() => unpackFrame('3.5', Buffer.from('0123456789abcdef'), frame)).toThrow()
   })
 
+  it('packs TinyTuya 3.5 CONTROL_NEW with encrypted version header, sequence and session key', () => {
+    // TinyTuya XenonDevice.generate_payload(CONTROL) overrides to 0x0d;
+    // message_helper.pack_message uses the 6699 header as GCM AAD.
+    // The fixed bytes were calculated independently with Python cryptography AESGCM.
+    const plain = Buffer.concat([Buffer.from('3.5'), Buffer.alloc(12),
+      Buffer.from('{"protocol":5,"t":1,"data":{"dps":{"1":true}}}')])
+    const frame = packFrame('3.5', Buffer.from('0123456789abcdef'), 7, 13, plain, Buffer.alloc(12))
+    expect(frame.toString('hex')).toBe('000066990000000000070000000d0000005900000000000000000000000071cc1f45f98a8cc38f5691b0a5ac38f99c99ccd14744d62183b17e08757cabe93f81d8a1250291be283d1b61ff940868da8d239255c08965d162d9a89fce91ff6d33845b6fcd620ed1e68d15e700009966')
+  })
+
   it('accepts a 3.5 reply return code and uses the TinyTuya nonce-derived session key', async () => {
     const key = Buffer.from('0123456789abcdef')
     const localNonce = Buffer.from('0123456789abcdef')
@@ -165,9 +175,13 @@ describe('Tuya LAN', () => {
         } else if (cmd === 5) {
           expect(unpackFrame('3.5', key, packet).payload).toEqual(finishHmac)
         } else {
-          expect(cmd).toBe(16)
-          expect(unpackFrame('3.5', sessionKey, packet).payload.toString()).toContain('"protocol":5')
-          queueMicrotask(() => this.emit('data', packFrame('3.5', sessionKey, 3, 16,
+          expect([13, 16]).toContain(cmd)
+          const plain = unpackFrame('3.5', sessionKey, packet).payload
+          if (cmd === 13) {
+            expect(plain.subarray(0, 15)).toEqual(Buffer.concat([Buffer.from('3.5'), Buffer.alloc(12)]))
+            expect(JSON.parse(plain.subarray(15).toString())).toMatchObject({ protocol: 5, data: { dps: { '1': true } } })
+          } else expect(plain.toString()).toContain('"protocol":5')
+          queueMicrotask(() => this.emit('data', packFrame('3.5', sessionKey, 3, cmd,
             Buffer.concat([Buffer.alloc(4), Buffer.from('{"data":{"dps":{"1":true}}}')]))))
         }
         return true
@@ -176,6 +190,7 @@ describe('Tuya LAN', () => {
     }
     const client = new TuyaLanClient(() => new FakeSocket() as unknown as Socket, () => localNonce)
     await expect(client.request({ ...device, localKey: key.toString(), version: '3.5' })).resolves.toEqual({ '1': true })
+    await expect(client.request({ ...device, localKey: key.toString(), version: '3.5' }, { '1': true })).resolves.toEqual({ '1': true })
   })
 
   it('returns an offline failure promptly when the socket fails', async () => {
@@ -194,6 +209,59 @@ describe('Tuya LAN', () => {
 })
 
 describe('Smart Life QR flow', () => {
+  it('shares a two-per-second queue and backs off exponentially on the sharing limit', async () => {
+    let now = 10_000
+    const starts: number[] = []
+    const queue = new SmartLifeRequestQueue(() => now, async ms => { now += ms }, () => 0)
+    const work = async () => { starts.push(now); return true }
+    await Promise.all([queue.run(work), queue.run(work)])
+    expect(starts).toEqual([10_000, 10_500])
+    await expect(queue.run(async () => { starts.push(now); throw new SmartLifeRateLimitError('code=-9999999') })).rejects.toThrow('-9999999')
+    expect(queue.coolingDown()).toBe(true)
+    await expect(queue.run(async () => { starts.push(now); throw new SmartLifeRateLimitError('code=-9999999') })).rejects.toThrow('-9999999')
+    await queue.run(work)
+    expect(starts).toEqual([10_000, 10_500, 11_000, 13_000, 17_000])
+    expect(queue.coolingDown()).toBe(false)
+  })
+
+  it('reads status for two devices in one queued home request and caches it', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
+      { id: 'one', status: [{ code: 'switch_led', value: true }] },
+      { id: 'two', status: [{ code: 'switch_1', value: false }] }
+    ] }) })
+    let clock = 10_000
+    const queue = new SmartLifeRequestQueue(() => clock, async ms => { clock += ms }, () => 0)
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, queue)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [
+      { id: 'one', name: 'One', category: 'dj', localKey: '', homeId: 'home' },
+      { id: 'two', name: 'Two', category: 'kg', localKey: '', homeId: 'home' }
+    ] }])
+    expect(await Promise.all([cloud.deviceStatus(session, 'one'), cloud.deviceStatus(session, 'two')])).toEqual([{ switch_led: true }, { switch_1: false }])
+    expect(await cloud.deviceStatus(session, 'one')).toEqual({ switch_led: true })
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(String(fetcher.mock.calls[0][0])).toContain('/v1.0/m/life/ha/home/devices')
+  })
+  it('turns API_QPS_LIMIT_OR_DEGRADE into a shared queue cooldown', async () => {
+    let clock = 10_000
+    const queue = new SmartLifeRequestQueue(() => clock, async ms => { clock += ms }, () => 0)
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: false, code: -9999999, msg: 'API_QPS_LIMIT_OR_DEGRADE' }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, queue)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    await expect(cloud.sendCommands(session, 'one', [{ code: 'switch_1', value: true }])).rejects.toBeInstanceOf(SmartLifeRateLimitError)
+    expect(cloud.isRateLimited()).toBe(true)
+  })
+  it('uses cloud channel names and device-number fallback instead of Canal 1', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: [{ ownerId: 'home', name: 'Casa' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: [{ id: 'switch', name: 'Interruptor Office', category: 'kg', local_key: 'fixture-key',
+        status: [{ code: 'switch_1', name: 'Luz do Office' }, { code: 'switch_2' }] }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: {} }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    const homes = await cloud.listHomes(session)
+    expect(homes[0].devices[0].channels).toEqual([{ dp: 1, name: 'Luz do Office' }, { dp: 2, name: 'Interruptor Office 2' }])
+  })
   it('requests QR token and polls without exposing a credential in errors', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: { qrcode: 'qr-token' } }) })
@@ -240,6 +308,16 @@ describe('Smart Life QR flow', () => {
 
 describe('typed light service', () => {
   const session = {} as SmartLifeSession
+
+  it('keeps the last known light state stale during Smart Life rate limiting', async () => {
+    const cloud = { registerHomes: vi.fn(), isRateLimited: vi.fn().mockReturnValue(true),
+      deviceStatus: vi.fn().mockResolvedValueOnce({ switch_led: true }).mockRejectedValueOnce(new SmartLifeRateLimitError('code=-9999999')) }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, {} as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
+    await service.restore([{ id: 'home', name: 'Casa', devices: [{ id: 'light', name: 'Luz', category: 'dj', localKey: '', homeId: 'home' }] }], session)
+    expect(await service.getState('light')).toEqual({ on: true, online: true, viaCloud: true })
+    expect(await service.getState('light')).toEqual({ on: true, online: true, viaCloud: true, stale: true })
+  })
   it('logs each LAN version and cloud failure with device context but no key', async () => {
     const key = 'abcdefghijklmnop'
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -329,7 +407,7 @@ describe('typed light service', () => {
     expect(lan.request).not.toHaveBeenCalled()
   })
 
-  it('uses Smart Life when a discovered LAN device stops responding', async () => {
+  it('falls back to Smart Life when a 3.5 LAN set fails', async () => {
     const cloud = {
       listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
         { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home' }
@@ -339,12 +417,12 @@ describe('typed light service', () => {
     }
     const lan = { request: vi.fn().mockRejectedValue(new Error('offline')) }
     const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient,
-      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: '192.168.15.9', version: '3.3' }]])),
+      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: '192.168.15.9', version: '3.5' }]])),
       vi.fn().mockResolvedValue([]))
     await service.discover(session)
     expect(await service.setLight('light-1', { on: true })).toEqual({ on: true, online: true, viaCloud: true })
     expect(cloud.sendCommands).toHaveBeenCalledWith(session, 'light-1', [{ code: 'switch_led', value: true }])
-    expect(lan.request).toHaveBeenCalledTimes(3)
+      expect(lan.request).toHaveBeenCalledTimes(1)
   })
 
   it('scrubs a saved WAN IP and persists the corrected setup', async () => {
