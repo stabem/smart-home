@@ -1,0 +1,31 @@
+schema: graphhelm.journey-flow/1
+id: tray-first-setup
+title: "First run, find the devices"
+status: draft
+approved: null
+base: http://127.0.0.1:5173
+actors: [owner, tuya-cloud, lg-thinq]
+secrets: []
+risks: [security]
+screens:
+  - id: setup
+    title: The Configurar screen on first run
+    url: /?fixture=empty
+    state: stable
+    expect: [{role: heading, name: Configurar}, {role: status, name: Token LG}, {role: status, name: Chaves Tuya}, {role: button, name: Buscar dispositivos}]
+    scope: unknown
+  - id: setup-found
+    title: "Devices found, listed per room"
+    url: /?fixture=empty
+    state: stable
+    expect: [{role: heading, name: Configurar}, {role: list, name: Dispositivos encontrados}, {role: button, name: Salvar}]
+    scope: unknown
+edges:
+  - id: setup.search
+    from: setup
+    to: setup-found
+    acts:
+      - {kind: activate, role: button, name: Buscar dispositivos}
+paths:
+  main: [setup.search]
+drift: []

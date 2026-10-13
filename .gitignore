@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+out/
+*.log
+devices.local.json
+# GraphHelm Runtime working directory: bearer token, event store, sealing key.
+.graphhelm/*
+!.graphhelm/journeys/
+/.mcp.json

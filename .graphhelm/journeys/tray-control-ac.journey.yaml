@@ -1,0 +1,31 @@
+schema: graphhelm.journey-flow/1
+id: tray-control-ac
+title: Turn on an AC and set its temperature
+status: draft
+approved: null
+base: http://127.0.0.1:5173
+actors: [owner, lg-thinq]
+secrets: []
+risks: []
+screens:
+  - id: home
+    title: The tray popup with the list of rooms
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Casa}, {role: button, name: Abrir Office}]
+    scope: unknown
+  - id: room-ac
+    title: The Office screen with the AC card
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Office}, {role: button, name: Ligar ar}, {role: slider, name: Temperatura}, {role: button, name: Diminuir}, {role: button, name: Aumentar}, {role: button, name: Modo}, {role: button, name: Ventilação}, {role: switch, name: Turbo}]
+    scope: unknown
+edges:
+  - id: home.open-office
+    from: home
+    to: room-ac
+    acts:
+      - {kind: activate, role: button, name: Abrir Office}
+paths:
+  main: [home.open-office]
+drift: []

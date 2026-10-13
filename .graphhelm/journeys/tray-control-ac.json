@@ -1,0 +1,98 @@
+{
+  "actors": [
+    {
+      "actorId": "owner",
+      "goal": "Turn on an AC and set its temperature",
+      "name": "owner"
+    },
+    {
+      "actorId": "lg-thinq",
+      "goal": "Turn on an AC and set its temperature",
+      "name": "lg-thinq"
+    }
+  ],
+  "contractId": "tray-control-ac",
+  "outOfScope": [],
+  "preconditions": [],
+  "promises": [
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "home.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Casa\", button \"Abrir Office\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "home"
+    },
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "room-ac.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Office\", button \"Ligar ar\", slider \"Temperatura\", button \"Diminuir\", button \"Aumentar\", button \"Modo\", button \"Ventilação\", switch \"Turbo\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "room-ac"
+    }
+  ],
+  "riskSignals": [],
+  "steps": [
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen home not reached"
+      },
+      "semanticAction": {
+        "kind": "navigate",
+        "target": {
+          "geometryClaim": false,
+          "strategy": "label",
+          "value": "/?fixture=house"
+        }
+      },
+      "stepId": "home"
+    },
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen room-ac not reached"
+      },
+      "semanticAction": {
+        "kind": "activate",
+        "target": {
+          "geometryClaim": false,
+          "role": "button",
+          "strategy": "accessible_name",
+          "value": "Abrir Office"
+        }
+      },
+      "stepId": "room-ac"
+    }
+  ],
+  "taskScope": "journey-flow tray-control-ac path main",
+  "title": "Turn on an AC and set its temperature",
+  "version": 1
+}

@@ -1,0 +1,93 @@
+{
+  "actors": [
+    {
+      "actorId": "owner",
+      "goal": "Turn a room's lights on or off",
+      "name": "owner"
+    }
+  ],
+  "contractId": "tray-toggle-room-lights",
+  "outOfScope": [],
+  "preconditions": [],
+  "promises": [
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "home.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Casa\", list \"Cômodos\", button \"Luzes Sala de estar\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "home"
+    },
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "home-lights-on.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Casa\", status \"Sala de estar luzes ligadas\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "home-lights-on"
+    }
+  ],
+  "riskSignals": [],
+  "steps": [
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen home not reached"
+      },
+      "semanticAction": {
+        "kind": "navigate",
+        "target": {
+          "geometryClaim": false,
+          "strategy": "label",
+          "value": "/?fixture=house"
+        }
+      },
+      "stepId": "home"
+    },
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen home-lights-on not reached"
+      },
+      "semanticAction": {
+        "kind": "activate",
+        "target": {
+          "geometryClaim": false,
+          "role": "button",
+          "strategy": "accessible_name",
+          "value": "Luzes Sala de estar"
+        }
+      },
+      "stepId": "home-lights-on"
+    }
+  ],
+  "taskScope": "journey-flow tray-toggle-room-lights path main",
+  "title": "Turn a room's lights on or off",
+  "version": 1
+}

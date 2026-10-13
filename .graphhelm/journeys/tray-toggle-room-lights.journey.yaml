@@ -1,0 +1,31 @@
+schema: graphhelm.journey-flow/1
+id: tray-toggle-room-lights
+title: Turn a room's lights on or off
+status: draft
+approved: null
+base: http://127.0.0.1:5173
+actors: [owner]
+secrets: []
+risks: []
+screens:
+  - id: home
+    title: The tray popup with the list of rooms
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Casa}, {role: list, name: Cômodos}, {role: button, name: Luzes Sala de estar}]
+    scope: unknown
+  - id: home-lights-on
+    title: "The same list, Sala de estar lights shown on"
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Casa}, {role: status, name: Sala de estar luzes ligadas}]
+    scope: unknown
+edges:
+  - id: home.toggle
+    from: home
+    to: home-lights-on
+    acts:
+      - {kind: activate, role: button, name: Luzes Sala de estar}
+paths:
+  main: [home.toggle]
+drift: []

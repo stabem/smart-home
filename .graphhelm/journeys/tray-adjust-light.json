@@ -1,0 +1,93 @@
+{
+  "actors": [
+    {
+      "actorId": "owner",
+      "goal": "Change one light's brightness and color",
+      "name": "owner"
+    }
+  ],
+  "contractId": "tray-adjust-light",
+  "outOfScope": [],
+  "preconditions": [],
+  "promises": [
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "home.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Casa\", button \"Abrir Quarto\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "home"
+    },
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "room.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Quarto\", switch \"Luz do quarto\", slider \"Brilho\", button \"Cor\", button \"Voltar\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "room"
+    }
+  ],
+  "riskSignals": [],
+  "steps": [
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen home not reached"
+      },
+      "semanticAction": {
+        "kind": "navigate",
+        "target": {
+          "geometryClaim": false,
+          "strategy": "label",
+          "value": "/?fixture=house"
+        }
+      },
+      "stepId": "home"
+    },
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen room not reached"
+      },
+      "semanticAction": {
+        "kind": "activate",
+        "target": {
+          "geometryClaim": false,
+          "role": "button",
+          "strategy": "accessible_name",
+          "value": "Abrir Quarto"
+        }
+      },
+      "stepId": "room"
+    }
+  ],
+  "taskScope": "journey-flow tray-adjust-light path main",
+  "title": "Change one light's brightness and color",
+  "version": 1
+}

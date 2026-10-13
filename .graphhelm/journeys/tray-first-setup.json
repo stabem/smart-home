@@ -1,0 +1,105 @@
+{
+  "actors": [
+    {
+      "actorId": "owner",
+      "goal": "First run, find the devices",
+      "name": "owner"
+    },
+    {
+      "actorId": "tuya-cloud",
+      "goal": "First run, find the devices",
+      "name": "tuya-cloud"
+    },
+    {
+      "actorId": "lg-thinq",
+      "goal": "First run, find the devices",
+      "name": "lg-thinq"
+    }
+  ],
+  "contractId": "tray-first-setup",
+  "outOfScope": [],
+  "preconditions": [],
+  "promises": [
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "setup.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Configurar\", status \"Token LG\", status \"Chaves Tuya\", button \"Buscar dispositivos\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "setup"
+    },
+    {
+      "maxEvidenceAgeSeconds": 604800,
+      "promiseId": "setup-found.visible",
+      "requiredEvidenceKinds": [
+        "visual_capture"
+      ],
+      "requiredFact": "content_rendered",
+      "requiredObserverCapability": "browser",
+      "statement": "shows heading \"Configurar\", list \"Dispositivos encontrados\", button \"Salvar\"",
+      "statesToObserve": [
+        "stable"
+      ],
+      "stepId": "setup-found"
+    }
+  ],
+  "riskSignals": [
+    "security"
+  ],
+  "steps": [
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen setup not reached"
+      },
+      "semanticAction": {
+        "kind": "navigate",
+        "target": {
+          "geometryClaim": false,
+          "strategy": "label",
+          "value": "/?fixture=empty"
+        }
+      },
+      "stepId": "setup"
+    },
+    {
+      "actorId": "owner",
+      "expectedStates": [
+        "stable"
+      ],
+      "failureContract": {
+        "prohibitedSideEffects": [],
+        "recoveryAction": null,
+        "safeStop": "stop replay",
+        "timeoutSeconds": 30,
+        "visibleError": "screen setup-found not reached"
+      },
+      "semanticAction": {
+        "kind": "activate",
+        "target": {
+          "geometryClaim": false,
+          "role": "button",
+          "strategy": "accessible_name",
+          "value": "Buscar dispositivos"
+        }
+      },
+      "stepId": "setup-found"
+    }
+  ],
+  "taskScope": "journey-flow tray-first-setup path main",
+  "title": "First run, find the devices",
+  "version": 1
+}

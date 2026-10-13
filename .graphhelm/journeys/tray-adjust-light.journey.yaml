@@ -1,0 +1,31 @@
+schema: graphhelm.journey-flow/1
+id: tray-adjust-light
+title: Change one light's brightness and color
+status: draft
+approved: null
+base: http://127.0.0.1:5173
+actors: [owner]
+secrets: []
+risks: []
+screens:
+  - id: home
+    title: The tray popup with the list of rooms
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Casa}, {role: button, name: Abrir Quarto}]
+    scope: unknown
+  - id: room
+    title: The Quarto screen with one card per light
+    url: /?fixture=house
+    state: stable
+    expect: [{role: heading, name: Quarto}, {role: switch, name: Luz do quarto}, {role: slider, name: Brilho}, {role: button, name: Cor}, {role: button, name: Voltar}]
+    scope: unknown
+edges:
+  - id: home.open-room
+    from: home
+    to: room
+    acts:
+      - {kind: activate, role: button, name: Abrir Quarto}
+paths:
+  main: [home.open-room]
+drift: []
