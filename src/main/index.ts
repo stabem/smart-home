@@ -1,9 +1,9 @@
 import { app, BrowserWindow, ipcMain, nativeImage, screen, Tray, Menu } from 'electron'
 import { join } from 'node:path'
-import { config } from 'dotenv'
-import type { Room } from '../shared/types'
+import { HomeController } from './home'
+import { loadEnvironment } from './store'
 
-config()
+loadEnvironment()
 
 let tray: Tray | undefined
 let popup: BrowserWindow | undefined
@@ -47,10 +47,13 @@ function togglePopup(): void {
 }
 
 app.whenReady().then(() => {
-  ipcMain.handle('rooms:list', async (): Promise<Room[]> => [])
-  ipcMain.handle('device:command', async () => {
-    throw new Error('Configure devices before sending commands')
-  })
+  const home = new HomeController()
+  ipcMain.handle('rooms:list', () => home.rooms())
+  ipcMain.handle('device:command', (_event, command) => home.command(command))
+  ipcMain.handle('setup:status', () => home.status())
+  ipcMain.handle('setup:login', (_event, userCode: unknown) => home.beginLogin(userCode))
+  ipcMain.handle('setup:discover', () => home.discover())
+  ipcMain.handle('setup:save', (_event, acRoomIds: unknown) => home.save(acRoomIds))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
   ipcMain.handle('login:set', (_event, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid login setting')

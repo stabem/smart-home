@@ -6,7 +6,7 @@ describe('house fixture', () => {
     const rooms = houseRooms()
     expect(rooms.map((room) => room.name)).toEqual(['Entrada', 'Cozinha', 'Mesa de jantar', 'Sala de estar', 'Banheiro', 'Banheiro da suíte', 'Office', 'Quarto'])
     expect(rooms.every((room) => room.lights.length > 0)).toBe(true)
-    expect(rooms.filter((room) => room.ac).map((room) => room.name)).toEqual(['Sala de estar', 'Office', 'Quarto'])
+    expect(rooms.filter((room) => room.acs.length).map((room) => room.name)).toEqual(['Sala de estar', 'Office', 'Quarto'])
   })
 
   it('updates fixture state without mutating prior snapshots', async () => {

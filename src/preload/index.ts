@@ -5,7 +5,11 @@ const api: SmartHomeApi = {
   getRooms: () => ipcRenderer.invoke('rooms:list'),
   sendCommand: (command) => ipcRenderer.invoke('device:command', command),
   getLaunchAtLogin: () => ipcRenderer.invoke('login:get'),
-  setLaunchAtLogin: (enabled) => ipcRenderer.invoke('login:set', enabled)
+  setLaunchAtLogin: (enabled) => ipcRenderer.invoke('login:set', enabled),
+  getSetupStatus: () => ipcRenderer.invoke('setup:status'),
+  beginSmartLifeLogin: (userCode) => ipcRenderer.invoke('setup:login', userCode),
+  discoverDevices: () => ipcRenderer.invoke('setup:discover'),
+  saveSetup: (acRoomIds) => ipcRenderer.invoke('setup:save', acRoomIds)
 }
 
 contextBridge.exposeInMainWorld('api', api)

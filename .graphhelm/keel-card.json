@@ -1,9 +1,25 @@
 {
-  "promise": "List LG ThinQ Connect air conditioners, read their profile and state, and send only profile-supported AC controls without exposing the PAT.",
+  "promise": "On first run, scan Smart Life QR with an optional User Code, discover Tuya rooms and every LG AC, assign unmatched ACs to rooms, save encrypted config, reject malformed IPC commands, and show offline lights without offering unusable controls.",
   "scopePaths": [
+    ".graphhelm/keel-card.json",
+    "src/shared/types.ts",
+    "src/preload/index.ts",
+    "src/main/index.ts",
+    "src/main/home.ts",
+    "src/main/home.test.ts",
+    "src/main/store/index.ts",
+    "src/main/store/index.test.ts",
+    "src/main/tuya/index.ts",
     "src/main/lg/client.ts",
     "src/main/lg/client.test.ts",
-    ".graphhelm/keel-card.json"
+    "src/renderer/App.tsx",
+    "src/renderer/fixtures/index.ts",
+    "src/renderer/fixtures/index.test.ts",
+    "src/renderer/journey-proof.mjs",
+    "src/renderer/style.css",
+    "package.json",
+    "package-lock.json"
   ],
-  "proof": "npm run typecheck && npm run lint && npm run test -- --run src/main/lg/client.test.ts && echo PROOF_OK"
+  "journeys": ["tray-first-setup"],
+  "proof": "node src/renderer/journey-proof.mjs && sh ci/local-ci.sh && echo PROOF_OK"
 }

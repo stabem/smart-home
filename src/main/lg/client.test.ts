@@ -43,6 +43,14 @@ describe('ThinQ AC client', () => {
     } })
   })
 
+  it('keeps an unreachable AC in the list as offline', async () => {
+    const fetcher = mockFetch({ '/devices': [
+      { deviceId: 'ac-1', deviceInfo: { alias: 'Office', deviceType: 'DEVICE_AIR_CONDITIONER' } }
+    ] })
+    const acs = await new LgClient('test-token', 'BR', fetcher).listAcs()
+    expect(acs).toMatchObject([{ id: 'ac-1', name: 'Office', state: { online: false } }])
+  })
+
   it('checks the profile before sending separate controls', async () => {
     const fetcher = mockFetch({ '/devices/ac-1/profile': profile, '/devices/ac-1/control': {} })
     await new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { on: true, targetTemperature: 24, fan: 'LOW' })
