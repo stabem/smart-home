@@ -23,6 +23,7 @@ export interface SmartLifeDevice {
   ip?: string
   version?: string
   channels?: Array<{ dp: number; name: string }>
+  cloudCodes?: string[]
 }
 export interface SmartLifeHome { id: string; name: string; devices: SmartLifeDevice[] }
 
@@ -55,6 +56,8 @@ function decrypt(value: string, secret: Buffer): unknown {
 }
 
 export class SmartLifeCloud {
+  private refreshInFlight: Promise<void> | null = null
+  onSessionChanged?: () => void
   constructor(private readonly fetcher: typeof fetch = fetch) {}
 
   private async publicRequest(path: string, method: 'GET' | 'POST'): Promise<Record<string, unknown>> {
@@ -87,24 +90,55 @@ export class SmartLifeCloud {
     }
   }
 
-  private async request(session: SmartLifeSession, path: string, params?: Record<string, string>): Promise<unknown> {
-    if (Date.now() >= session.expiresAt - 60_000) throw new Error('Smart Life session expired; scan QR again')
+  private async request(session: SmartLifeSession, path: string, params?: Record<string, string>, body?: object, refreshing = false): Promise<unknown> {
+    if (!refreshing && Date.now() >= session.expiresAt - 60_000) {
+      if (!this.refreshInFlight) this.refreshInFlight = this.refreshSession(session).finally(() => { this.refreshInFlight = null })
+      await this.refreshInFlight
+    }
     const rid = randomUUID()
     const { hashKey, secret } = secretFor(rid, session.refreshToken)
     const encdata = params ? encrypt(params, secret) : ''
+    const bodyData = body ? encrypt(body, secret) : ''
     const headers: Record<string, string> = {
       'X-appKey': CLIENT_ID, 'X-requestId': rid, 'X-sid': '', 'X-time': String(Date.now()), 'X-token': session.accessToken
     }
+    if (body) headers['Content-Type'] = 'application/json'
     const signed = ['X-appKey', 'X-requestId', 'X-sid', 'X-time', 'X-token']
-      .filter(name => headers[name]).map(name => `${name}=${headers[name]}`).join('||') + encdata
+      .filter(name => headers[name]).map(name => `${name}=${headers[name]}`).join('||') + encdata + bodyData
     headers['X-sign'] = createHmac('sha256', hashKey).update(signed).digest('hex')
     const url = new URL(path, session.endpoint)
     if (encdata) url.searchParams.set('encdata', encdata)
-    const response = await this.fetcher(url, { headers, signal: AbortSignal.timeout(8000) })
+    const response = await this.fetcher(url, { method: body ? 'POST' : 'GET', headers,
+      body: body ? JSON.stringify({ encdata: bodyData }) : undefined, signal: AbortSignal.timeout(8000) })
     if (!response.ok) throw new Error('Smart Life device request failed')
-    const body = record(await response.json())
-    if (body.success !== true) throw new Error('Smart Life device request rejected')
-    return decrypt(string(body.result), secret)
+    const responseBody = record(await response.json())
+    if (responseBody.success !== true) throw new Error('Smart Life device request rejected')
+    return typeof responseBody.result === 'string' && responseBody.result ? decrypt(responseBody.result, secret) : responseBody.result
+  }
+
+  private async refreshSession(session: SmartLifeSession): Promise<void> {
+    const result = record(await this.request(session, `/v1.0/m/token/${encodeURIComponent(session.refreshToken)}`, undefined, undefined, true))
+    const accessToken = string(result.accessToken)
+    const refreshToken = string(result.refreshToken)
+    const expiresAt = Date.now() + Number(result.expireTime) * 1000
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) throw new Error('Invalid Smart Life token expiry')
+    Object.assign(session, { accessToken, refreshToken, expiresAt })
+    this.onSessionChanged?.()
+  }
+
+  async deviceStatus(session: SmartLifeSession, id: string): Promise<Record<string, unknown>> {
+    const devices = await this.request(session, '/v1.0/m/life/ha/devices/detail', { devIds: id })
+    if (!Array.isArray(devices) || devices.length !== 1) throw new Error('Invalid Smart Life device status')
+    const status = record(devices[0]).status
+    if (!Array.isArray(status)) throw new Error('Invalid Smart Life device status')
+    return Object.fromEntries(status.map(value => {
+      const item = record(value)
+      return [string(item.code), item.value]
+    }))
+  }
+
+  async sendCommands(session: SmartLifeSession, id: string, commands: Array<{ code: string; value: unknown }>): Promise<void> {
+    await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands })
   }
 
   async listHomes(session: SmartLifeSession): Promise<SmartLifeHome[]> {
@@ -125,6 +159,8 @@ export class SmartLifeCloud {
         }
         const entries = [device.status, device.functions].flatMap(value => Array.isArray(value) ? value :
           value && typeof value === 'object' ? Object.entries(value).map(([code, detail]) => ({ code, ...(detail && typeof detail === 'object' ? detail : {}) })) : [])
+        result.cloudCodes = [...new Set(entries.filter(value => value && typeof value === 'object')
+          .map(value => String((value as Record<string, unknown>).code ?? '')).filter(Boolean))]
         const channels = new Map<number, string>()
         for (const value of entries) {
           if (!value || typeof value !== 'object') continue

@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { connect, type Socket } from 'node:net'
+import { connect, isIP, type Socket } from 'node:net'
 
 export type TuyaVersion = '3.3' | '3.4' | '3.5'
 export type Dps = Record<string, unknown>
@@ -188,6 +188,11 @@ export class TuyaLanClient {
 }
 
 export const udpKey = createHash('md5').update('yGAdlopoPVldABfn').digest()
+export function isLanIp(ip: string): boolean {
+  if (isIP(ip) !== 4) return false
+  const [a, b] = ip.split('.').map(Number)
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+}
 export function decodeBroadcast(data: Buffer): { id: string; ip: string; version?: TuyaVersion } | undefined {
   try {
     let payload = data
@@ -204,8 +209,8 @@ export function decodeBroadcast(data: Buffer): { id: string; ip: string; version
     } else if (data[0] !== 123) payload = unecb(data, udpKey)
     if (payload.length >= 4 && payload[0] === 0 && payload[1] === 0 && payload[2] === 0) payload = payload.subarray(4)
     if (payload.subarray(0, 3).toString().startsWith('3.')) payload = payload.subarray(15)
-    const entry = JSON.parse(payload.toString('utf8')) as { gwId?: string; devId?: string; ip?: string; version?: string }
-    if (!entry.ip || !(entry.gwId || entry.devId)) return undefined
+    const entry = JSON.parse(payload.toString('utf8').replace(/\0+$/, '')) as { gwId?: string; devId?: string; ip?: string; version?: string }
+    if (!entry.ip || !isLanIp(entry.ip) || !(entry.gwId || entry.devId)) return undefined
     return { id: entry.gwId ?? entry.devId!, ip: entry.ip, version: ['3.3', '3.4', '3.5'].includes(entry.version ?? '') ? entry.version as TuyaVersion : undefined }
   } catch { return undefined }
 }
