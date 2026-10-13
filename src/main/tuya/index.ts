@@ -1,7 +1,8 @@
 import type { LightState } from '../../shared/types'
 import { SmartLifeCloud, type SmartLifeHome, type SmartLifeSession, type SmartLifeDevice } from './cloud'
 import { discoverLan } from './discovery'
-import { TuyaLanClient, type Dps, type LanDevice, type TuyaVersion } from './protocol'
+import { probeTcp } from './probe'
+import { isLanIp, TuyaLanClient, type Dps, type LanDevice, type TuyaVersion } from './protocol'
 
 export { SmartLifeCloud, type SmartLifeHome, type SmartLifeSession, type SmartLifeDevice } from './cloud'
 export { TuyaLanClient, type LanDevice, type TuyaVersion } from './protocol'
@@ -14,59 +15,127 @@ function channel(id: string): { id: string; dp: number } {
 }
 export class TuyaService {
   private readonly devices = new Map<string, LanDevice & { category: string }>()
+  private session: SmartLifeSession | null = null
+  private homes: SmartLifeHome[] = []
+  private addressSink: ((homes: SmartLifeHome[]) => void) | null = null
+  private timer: ReturnType<typeof setInterval> | null = null
+  private refreshing = false
   constructor(
     private readonly cloud = new SmartLifeCloud(),
     private readonly lan = new TuyaLanClient(),
-    private readonly scan = discoverLan
+    private readonly scan = discoverLan,
+    private readonly probe = probeTcp
   ) {}
 
+  onAddressesChanged(sink: (homes: SmartLifeHome[]) => void): void {
+    this.addressSink = sink
+    this.cloud.onSessionChanged = () => sink(this.homes)
+  }
+
   async discover(session: SmartLifeSession): Promise<SmartLifeHome[]> {
-    const [homes, addresses] = await Promise.all([this.cloud.listHomes(session), this.scan().catch(() => new Map())])
-    this.devices.clear()
-    for (const home of homes) for (const device of home.devices) {
-      const lan = addresses.get(device.id)
-      const version = lan?.version ?? device.version
-      if (!device.localKey) continue
-      device.ip = lan?.ip ?? device.ip
-      device.version = version
-      if (device.ip) {
-        const entry = { id: device.id, ip: device.ip, localKey: device.localKey, version: versions.includes(version as TuyaVersion) ? version as TuyaVersion : '3.3' as const, category: device.category }
-        this.devices.set(device.id, entry)
-        await this.populateChannels(device, entry)
-      }
-    }
+    this.session = session
+    this.homes = await this.cloud.listHomes(session)
+    for (const home of this.homes) for (const device of home.devices) device.ip = undefined
+    await this.resolveAddresses()
+    this.startRefresh()
+    const homes = this.homes
     return homes
   }
 
-  async restore(homes: SmartLifeHome[]): Promise<void> {
-    const addresses = await this.scan().catch(() => new Map())
+  async restore(homes: SmartLifeHome[], session?: SmartLifeSession | null): Promise<void> {
+    this.session = session ?? null
+    this.homes = homes
+    let scrubbed = false
+    for (const home of homes) for (const device of home.devices) if (device.ip && !isLanIp(device.ip)) {
+      device.ip = undefined
+      scrubbed = true
+    }
+    await this.resolveAddresses()
+    if (scrubbed) this.addressSink?.(homes)
+    this.startRefresh()
+  }
+
+  private startRefresh(): void {
+    if (this.timer) clearInterval(this.timer)
+    this.timer = setInterval(() => { void this.resolveAddresses().catch(() => {}) }, 5 * 60_000)
+    this.timer.unref?.()
+  }
+
+  private async resolveAddresses(): Promise<void> {
+    if (this.refreshing) return
+    this.refreshing = true
+    try {
+    const deadline = Date.now() + 8000
+    const withinDeadline = async <T>(work: Promise<T>): Promise<T | undefined> => {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) return undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try { return await Promise.race([work, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), remaining) })]) }
+      finally { if (timer) clearTimeout(timer) }
+    }
+    const addresses = await withinDeadline(this.scan().catch(() => new Map<string, { id: string; ip: string; version?: TuyaVersion }>()))
+      ?? new Map<string, { id: string; ip: string; version?: TuyaVersion }>()
+    const missing = this.homes.flatMap(home => home.devices).filter(device => device.localKey && !isLanIp(addresses.get(device.id)?.ip ?? '') && !isLanIp(device.ip ?? ''))
+    if (missing.length) {
+      const candidates = await withinDeadline(this.probe(undefined, undefined, undefined, deadline).catch(() => [])) ?? []
+      for (const ip of candidates) {
+        if (Date.now() >= deadline) break
+        for (const device of [...missing]) {
+          if (Date.now() >= deadline) break
+          const known = versions.includes(device.version as TuyaVersion) ? device.version as TuyaVersion : '3.3'
+          for (const version of [known, ...versions.filter(value => value !== known)]) {
+            if (Date.now() >= deadline) break
+            try {
+              const dps = await withinDeadline(this.lan.request({ id: device.id, ip, localKey: device.localKey, version }))
+              if (!dps || !Object.values(dps).some(value => typeof value === 'boolean')) continue
+              addresses.set(device.id, { id: device.id, ip, version })
+              missing.splice(missing.indexOf(device), 1)
+              break
+            } catch { /* Another device or protocol version. */ }
+          }
+        }
+        if (!missing.length) break
+      }
+    }
+    let changed = false
     this.devices.clear()
-    for (const home of homes) for (const device of home.devices) {
-      const ip = addresses.get(device.id)?.ip ?? device.ip
-      const version = addresses.get(device.id)?.version ?? device.version
+    for (const home of this.homes) for (const device of home.devices) {
+      const announced = addresses.get(device.id)
+      const lan = announced && isLanIp(announced.ip) ? announced : undefined
+      const ip = lan?.ip ?? (isLanIp(device.ip ?? '') ? device.ip : undefined)
+      const version = lan?.version ?? device.version
+      if (device.ip !== ip || device.version !== version) changed = true
+      device.ip = ip
+      device.version = version
+      console.info(`Tuya id=${device.id} LAN ${ip ?? 'not found on LAN'}`)
       if (ip && device.localKey) {
         const entry = { id: device.id, ip, localKey: device.localKey, version: versions.includes(version as TuyaVersion) ? version as TuyaVersion : '3.3' as const, category: device.category }
         this.devices.set(device.id, entry)
-        await this.populateChannels(device, entry)
+        if (Date.now() < deadline) await withinDeadline(this.populateChannels(device, entry))
       }
     }
+    if (changed) this.addressSink?.(this.homes)
+    } finally { this.refreshing = false }
   }
 
   async getState(id: string): Promise<LightState> {
     const selected = channel(id)
     const device = this.devices.get(selected.id)
-    if (!device) return { on: false, online: false }
-    try { return this.toState(device.category, await this.requestWithFallback(device), selected.dp) }
-    catch { return { on: false, online: false } }
+    if (device) {
+      try { return this.toState(device.category, await this.requestWithFallback(device), selected.dp) }
+      catch { /* Fall through to Smart Life. */ }
+    }
+    return this.cloudState(selected.id, selected.dp)
   }
 
   async setLight(id: string, patch: LightPatch): Promise<LightState> {
     const selected = channel(id)
     const device = this.devices.get(selected.id)
-    if (!device) return { on: false, online: false }
+    const cloudDevice = this.homes.flatMap(home => home.devices).find(value => value.id === selected.id)
+    if (!cloudDevice) return { on: false, online: false }
     const dps: Dps = {}
-    const light = device.category === 'dj'
-    if (!light && !['kg', 'cz'].includes(device.category)) throw new Error('Unsupported Tuya light category')
+    const light = cloudDevice.category === 'dj'
+    if (!light && !['kg', 'cz'].includes(cloudDevice.category)) throw new Error('Unsupported Tuya light category')
     if (patch.on !== undefined) dps[String(selected.dp)] = patch.on
     if (patch.brightness !== undefined) {
       if (!light) throw new Error('Brightness unsupported by switch')
@@ -82,9 +151,16 @@ export class TuyaService {
       dps['2'] = 'colour'
     }
     if (!Object.keys(dps).length) return this.getState(id)
+    if (device) {
+      try { await this.requestWithFallback(device, dps); return this.getState(id) }
+      catch { /* Fall through to Smart Life. */ }
+    }
+    if (!this.session) return { on: false, online: false }
     try {
-      await this.requestWithFallback(device, dps)
-      return this.getState(id)
+      const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
+      await this.cloud.sendCommands(this.session, selected.id, commands)
+      const state = await this.cloudState(selected.id, selected.dp)
+      return state
     } catch { return { on: false, online: false } }
   }
 
@@ -98,10 +174,44 @@ export class TuyaService {
         return result
       } catch (error) {
         lastError = error
-        console.warn(`Tuya LAN failed id=${device.id} ip=${device.ip} version=${version} error=${error instanceof Error ? error.name : 'UnknownError'}`)
       }
     }
+    const cached = this.homes.flatMap(home => home.devices).find(value => value.id === device.id)
+    if (cached?.ip === device.ip) {
+      cached.ip = undefined
+      this.devices.delete(device.id)
+      this.addressSink?.(this.homes)
+      void this.resolveAddresses().catch(() => {})
+    }
     throw lastError
+  }
+
+  private cloudCommands(device: SmartLifeDevice, dp: number, patch: LightPatch): Array<{ code: string; value: unknown }> {
+    const supported = new Set(device.cloudCodes ?? [])
+    const choose = (...codes: string[]): string => codes.find(code => supported.has(code)) ?? codes[0]
+    const commands: Array<{ code: string; value: unknown }> = []
+    if (patch.on !== undefined) commands.push({ code: device.category === 'dj' ? choose('switch_led', 'switch_1') : choose(`switch_${dp}`, 'switch'), value: patch.on })
+    if (patch.brightness !== undefined) commands.push({ code: choose('bright_value_v2', 'bright_value'), value: Math.round(patch.brightness * 10) })
+    if (patch.temperature !== undefined) commands.push({ code: choose('temp_value_v2', 'temp_value'), value: Math.round(patch.temperature * 10) })
+    if (patch.color !== undefined) throw new Error('Cloud color control unsupported')
+    return commands
+  }
+
+  private async cloudState(id: string, dp: number): Promise<LightState> {
+    if (!this.session) return { on: false, online: false }
+    const device = this.homes.flatMap(home => home.devices).find(value => value.id === id)
+    if (!device) return { on: false, online: false }
+    try {
+      const status = await this.cloud.deviceStatus(this.session, id)
+      const on = device.category === 'dj' ? status.switch_led ?? status.switch_1 : status[`switch_${dp}`] ?? status.switch
+      if (typeof on !== 'boolean') return { on: false, online: false }
+      const state: LightState = { on, online: true, viaCloud: true }
+      const brightness = status.bright_value_v2 ?? status.bright_value
+      const temperature = status.temp_value_v2 ?? status.temp_value
+      if (typeof brightness === 'number') state.brightness = Math.round(brightness / 10)
+      if (typeof temperature === 'number') state.temperature = Math.round(temperature / 10)
+      return state
+    } catch { return { on: false, online: false } }
   }
 
   private async populateChannels(device: SmartLifeDevice, entry: LanDevice): Promise<void> {
