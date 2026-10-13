@@ -2,11 +2,19 @@
   "promise": "Issue #22: solicited Tuya 3.5 devices are discovered on UDP 7000; address resolution finishes within eight seconds even with slow open hosts; cloud light changes are shown as online only after a successful status read.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
+    "src/main/home.ts",
+    "src/main/tuya/cloud.ts",
     "src/main/tuya/discovery.ts",
     "src/main/tuya/index.ts",
     "src/main/tuya/probe.ts",
-    "src/main/tuya/tuya.test.ts"
+    "src/main/tuya/protocol.ts",
+    "src/main/tuya/tuya.test.ts",
+    "src/renderer/App.tsx",
+    "src/shared/types.ts"
   ],
   "proof": "npx vitest run src/main/tuya/tuya.test.ts && sh ci/local-ci.sh",
-  "journeys": ["tray-toggle-room-lights", "tray-adjust-light"]
+  "journeys": [
+    "tray-toggle-room-lights",
+    "tray-adjust-light"
+  ]
 }
