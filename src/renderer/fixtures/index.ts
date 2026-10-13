@@ -15,7 +15,7 @@ export function houseRooms(): Room[] {
     acs: acRooms.has(name) ? [{
       id: `ac-${index + 1}`,
       name: `Ar ${name}`,
-      state: { on: false, currentTemperature: 24, targetTemperature: 23, online: true, mode: 'Frio', fan: 'Auto', turbo: false }
+      state: { on: false, currentTemperature: 24, targetTemperature: 23, online: true, mode: 'Resfriar', fan: 'Auto', turbo: false }
     }] : []
   }))
 }
@@ -38,6 +38,9 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
         const ac = room.acs.find(item => item.id === command.deviceId)
         if (ac && command.kind === 'ac.power') { ac.state.on = command.on; return }
         if (ac && command.kind === 'ac.temperature') { ac.state.targetTemperature = command.temperature; return }
+        if (ac && command.kind === 'ac.mode') { ac.state.mode = command.mode; ac.state.turbo = false; return }
+        if (ac && command.kind === 'ac.fan') { ac.state.fan = command.fan; return }
+        if (ac && command.kind === 'ac.turbo') { ac.state.turbo = command.on; return }
       }
       throw new Error('Dispositivo não encontrado')
     },

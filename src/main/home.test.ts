@@ -47,6 +47,12 @@ describe('main process setup and control', () => {
     expect(tuya.setLight).toHaveBeenCalledWith('light-1', { on: true })
     await home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 22 })
     expect(lg.setAc).toHaveBeenCalledWith('ac-1', { targetTemperature: 22 })
+    await home.command({ kind: 'ac.mode', deviceId: 'ac-1', mode: 'Seco' })
+    await home.command({ kind: 'ac.fan', deviceId: 'ac-1', fan: 'Média' })
+    await home.command({ kind: 'ac.turbo', deviceId: 'ac-1', on: true })
+    expect(lg.setAc).toHaveBeenCalledWith('ac-1', { mode: 'Seco' })
+    expect(lg.setAc).toHaveBeenCalledWith('ac-1', { fan: 'Média' })
+    expect(lg.setAc).toHaveBeenCalledWith('ac-1', { turbo: true })
     tuya.setLight.mockResolvedValueOnce({ on: false, online: false })
     await expect(home.command({ kind: 'light.power', deviceId: 'light-1', on: true })).rejects.toThrow('offline')
     await expect(home.command({ kind: 'light.power', deviceId: 'unknown', on: true })).rejects.toThrow('not found')
@@ -79,6 +85,9 @@ describe('main process setup and control', () => {
       { kind: 'light.color', deviceId: 'light-1', color: 'red' },
       { kind: 'ac.power', deviceId: 'ac-1', on: 1 },
       { kind: 'ac.temperature', deviceId: 'ac-1', temperature: 31 },
+      { kind: 'ac.mode', deviceId: 'ac-1', mode: 'Heat' },
+      { kind: 'ac.fan', deviceId: 'ac-1', fan: 'Turbo' },
+      { kind: 'ac.turbo', deviceId: 'ac-1', on: 'true' },
       { kind: 'ac.temperature', deviceId: '', temperature: 22 },
       { kind: 'unknown', deviceId: 'light-1' }
     ]
