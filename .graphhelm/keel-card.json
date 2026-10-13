@@ -1,7 +1,7 @@
 {
-  "issue": 5,
   "promise": "On first run, scan Smart Life QR with an optional User Code, discover Tuya rooms and every LG AC, assign unmatched ACs to rooms, save encrypted config, reject malformed IPC commands, and show offline lights without offering unusable controls.",
   "scopePaths": [
+    ".graphhelm/keel-card.json",
     "src/shared/types.ts",
     "src/preload/index.ts",
     "src/main/index.ts",
@@ -14,6 +14,7 @@
     "src/main/lg/client.test.ts",
     "src/renderer/App.tsx",
     "src/renderer/fixtures/index.ts",
+    "src/renderer/fixtures/index.test.ts",
     "src/renderer/journey-proof.mjs",
     "src/renderer/style.css",
     "package.json",
