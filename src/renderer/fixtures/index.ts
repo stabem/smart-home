@@ -22,6 +22,8 @@ export function houseRooms(): Room[] {
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
   const rooms = fixture === 'house' ? houseRooms() : []
+  let configured = fixture === 'house'
+  let found = false
   let launchAtLogin = false
   return {
     async getRooms() { return structuredClone(rooms) },
@@ -39,6 +41,14 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
       throw new Error('Dispositivo não encontrado')
     },
     async getLaunchAtLogin() { return launchAtLogin },
-    async setLaunchAtLogin(enabled) { launchAtLogin = enabled }
+    async setLaunchAtLogin(enabled) { launchAtLogin = enabled },
+    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured } },
+    async beginSmartLifeLogin() { return 'tuyaSmart--qrLogin?token=fixture-only' },
+    async discoverDevices() { found = true; return houseRooms() },
+    async saveSetup() {
+      if (!found) throw new Error('Busque dispositivos antes de salvar')
+      rooms.push(...houseRooms())
+      configured = true
+    }
   }
 }

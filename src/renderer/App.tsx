@@ -1,33 +1,69 @@
 import { useEffect, useState } from 'react'
-import type { DeviceCommand, Room, SmartHomeApi } from '../shared/types'
-
-type AppearanceCommand =
-  | { kind: 'light.color'; deviceId: string; color: string }
-  | { kind: 'light.temperature'; deviceId: string; temperature: number }
+import QRCode from 'qrcode'
+import type { DeviceCommand, Room, SetupStatus, SmartHomeApi } from '../shared/types'
 
 export function App({ api }: { api: SmartHomeApi }) {
   const [rooms, setRooms] = useState<Room[] | null>(null)
+  const [setup, setSetup] = useState<SetupStatus | null>(null)
+  const [discovered, setDiscovered] = useState<Room[] | null>(null)
+  const [qrImage, setQrImage] = useState('')
+  const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [login, setLogin] = useState(false)
-  const [found, setFound] = useState(false)
   const [colorFor, setColorFor] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   async function refresh() { setRooms(await api.getRooms()) }
-  useEffect(() => { void api.getRooms().then(setRooms); void api.getLaunchAtLogin().then(setLogin) }, [api])
+  useEffect(() => {
+    void api.getSetupStatus().then(setSetup).catch(() => setError('Não foi possível abrir a configuração salva.'))
+    void api.getRooms().then(setRooms).catch(() => setRooms([]))
+    void api.getLaunchAtLogin().then(setLogin)
+  }, [api])
 
-  async function command(value: DeviceCommand | AppearanceCommand) {
-    try { setError(''); await api.sendCommand(value as DeviceCommand); await refresh() }
+  async function beginLogin() {
+    try {
+      setError('')
+      const uri = await api.beginSmartLifeLogin()
+      setQrImage(await QRCode.toDataURL(uri, { width: 192, margin: 2 }))
+    } catch { setError('Não foi possível gerar o QR. Confira USER_CODE_SMARTLIFE e a conexão.') }
+  }
+
+  async function search() {
+    setBusy(true)
+    setError('')
+    try { setDiscovered(await api.discoverDevices()) }
+    catch { setError('Busca falhou ou o QR ainda não foi lido. Tente novamente.') }
+    finally { setBusy(false) }
+  }
+
+  async function save() {
+    setBusy(true)
+    setError('')
+    try {
+      await api.saveSetup()
+      setSetup(await api.getSetupStatus())
+      await refresh()
+    } catch { setError('Não foi possível salvar a configuração com proteção do sistema.') }
+    finally { setBusy(false) }
+  }
+
+  async function command(value: DeviceCommand) {
+    try { setError(''); await api.sendCommand(value); await refresh() }
     catch { setError('Não foi possível atualizar o dispositivo.') }
   }
 
-  if (rooms === null) return <main><p role="status">Carregando...</p></main>
-  if (rooms.length === 0) return <main>
+  if (rooms === null || setup === null) return <main><p role="status">Carregando...</p>{error && <p role="alert">{error}</p>}</main>
+  if (!setup.configured) return <main>
     <header><h1>Configurar</h1></header>
-    <section className="card"><p role="status" aria-label="Token LG">Token LG: não configurado</p><p role="status" aria-label="Chaves Tuya">Chaves Tuya: não configuradas</p></section>
-    <button onClick={() => setFound(true)}>Buscar dispositivos</button>
-    {found && <><ul aria-label="Dispositivos encontrados"><li>Nenhum dispositivo encontrado</li></ul><button disabled>Salvar</button></>}
-    <p className="muted">Conexão com Smart Life e LG chega em uma próxima etapa.</p>
+    <section className="card"><p role="status" aria-label="Token LG">Token LG: {setup.lgTokenConfigured ? 'pronto' : 'não configurado'}</p><p role="status" aria-label="Chaves Tuya">Chaves Tuya: {setup.tuyaKeysConfigured ? 'salvas' : 'não configuradas'}</p></section>
+    <section className="card setupFlow">
+      <p>Escaneie o QR com o app Smart Life.</p>
+      <button onClick={() => void beginLogin()}>Gerar QR Smart Life</button>
+      {qrImage && <img className="qr" src={qrImage} alt="QR Smart Life" />}
+      <button disabled={busy} onClick={() => void search()}>Buscar dispositivos</button>
+    </section>
+    {discovered && <section className="card"><h2>Dispositivos encontrados</h2><ul aria-label="Dispositivos encontrados">{discovered.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{room.lights.map(light => <li key={light.id}>{light.name}</li>)}{room.ac && <li>{room.ac.name}</li>}</ul></li>)}</ul><button disabled={busy || !discovered.length} onClick={() => void save()}>Salvar</button></section>}
+    {error && <p role="alert">{error}</p>}
   </main>
 
   const room = rooms.find((item) => item.id === selected)
