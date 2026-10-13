@@ -62,14 +62,15 @@ app.whenReady().then(() => {
   })
 
   popup = new BrowserWindow({
-    width: 380,
-    height: 550,
+    width: 420,
+    height: 640,
     show: false,
     frame: false,
     resizable: false,
     skipTaskbar: true,
     autoHideMenuBar: true,
-    backgroundColor: '#111827',
+    transparent: true,
+    backgroundMaterial: 'acrylic',
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
