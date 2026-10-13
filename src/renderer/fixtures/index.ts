@@ -10,7 +10,7 @@ export function houseRooms(): Room[] {
     lights: [{
       id: `light-${index + 1}`,
       name: name === 'Quarto' ? 'Luz do quarto' : `Luz ${name}`,
-      state: { on: false, brightness: 70, online: true }
+      state: { on: false, brightness: 70, online: true, ...(name === 'Quarto' ? { color: '#ffffff', temperature: 50 } : {}) }
     }],
     ...(acRooms.has(name) ? { ac: {
       id: `ac-${index + 1}`,
@@ -26,10 +26,13 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
   return {
     async getRooms() { return structuredClone(rooms) },
     async sendCommand(command: DeviceCommand) {
+      const appearance = command as DeviceCommand | { kind: 'light.color'; deviceId: string; color: string } | { kind: 'light.temperature'; deviceId: string; temperature: number }
       for (const room of rooms) {
         const light = room.lights.find((item) => item.id === command.deviceId)
         if (light && command.kind === 'light.power') { light.state.on = command.on; return }
         if (light && command.kind === 'light.brightness') { light.state.brightness = command.brightness; return }
+        if (light && appearance.kind === 'light.color' && light.state.color !== undefined) { light.state.color = appearance.color; return }
+        if (light && appearance.kind === 'light.temperature' && light.state.temperature !== undefined) { light.state.temperature = appearance.temperature; return }
         if (room.ac?.id === command.deviceId && command.kind === 'ac.power') { room.ac.state.on = command.on; return }
         if (room.ac?.id === command.deviceId && command.kind === 'ac.temperature') { room.ac.state.targetTemperature = command.temperature; return }
       }

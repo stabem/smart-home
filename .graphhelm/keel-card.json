@@ -1,5 +1,16 @@
 {
-  "promise": "Discover Smart Life lights and control supported Tuya DPS over LAN, returning offline within two seconds for unreachable devices without exposing keys.",
-  "scopePaths": ["src/main/tuya/**", ".graphhelm/keel-card.json"],
-  "proof": "npm run typecheck && npm run lint && npm run test -- src/main/tuya && echo PROOF_OK"
+  "promise": "In the browser house fixture, Casa toggles room lights and room screens control light power, brightness, color and white temperature, plus AC power and target temperature, with state reflected after each command.",
+  "scopePaths": [
+    "src/renderer/App.tsx",
+    "src/renderer/style.css",
+    "src/renderer/fixtures/index.ts",
+    "src/renderer/journey-proof.mjs",
+    ".graphhelm/keel-card.json"
+  ],
+  "journeys": [
+    "tray-toggle-room-lights",
+    "tray-adjust-light",
+    "tray-control-ac"
+  ],
+  "proof": "node src/renderer/journey-proof.mjs && echo PROOF_OK"
 }
