@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { HomeController } from './home'
 import { loadEnvironment } from './store'
 
+app.setName('smart-home-tray')
 loadEnvironment()
 
 let tray: Tray | undefined

@@ -1,25 +1,14 @@
 {
-  "promise": "On first run, scan Smart Life QR with an optional User Code, discover Tuya rooms and every LG AC, assign unmatched ACs to rooms, save encrypted config, reject malformed IPC commands, and show offline lights without offering unusable controls.",
+  "promise": "After Save, the packaged app reopens for the same Windows user with LG and Smart Life credentials from the encrypted setup store; older setup files still use environment fallback, and credentials never cross renderer IPC.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/shared/types.ts",
-    "src/preload/index.ts",
     "src/main/index.ts",
     "src/main/home.ts",
     "src/main/home.test.ts",
     "src/main/store/index.ts",
     "src/main/store/index.test.ts",
-    "src/main/tuya/index.ts",
-    "src/main/lg/client.ts",
-    "src/main/lg/client.test.ts",
-    "src/renderer/App.tsx",
-    "src/renderer/fixtures/index.ts",
-    "src/renderer/fixtures/index.test.ts",
-    "src/renderer/journey-proof.mjs",
-    "src/renderer/style.css",
-    "package.json",
-    "package-lock.json"
+    "package.json"
   ],
   "journeys": ["tray-first-setup"],
-  "proof": "node src/renderer/journey-proof.mjs && sh ci/local-ci.sh && echo PROOF_OK"
+  "proof": "npm run typecheck && npm run test -- src/main/store/index.test.ts src/main/home.test.ts && echo PROOF_OK"
 }

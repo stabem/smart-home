@@ -57,6 +57,8 @@ export class HomeController {
   private qrToken: string | null = null
   private loginUserCode: string | null = null
   private session: SmartLifeSession | null = null
+  private readonly lgPat: string | undefined
+  private readonly lgCountry: string
   private readonly lg: LgClient | null
   private readonly ready: Promise<void>
 
@@ -67,19 +69,22 @@ export class HomeController {
     lg?: LgClient | null
   ) {
     this.saved = store.load()
-    this.lg = lg === undefined ? (process.env.LG_PAT ? new LgClient(process.env.LG_PAT, process.env.LG_COUNTRY || 'BR') : null) : lg
+    this.lgPat = this.saved?.lgPat || process.env.LG_PAT
+    this.lgCountry = this.saved?.lgCountry || process.env.LG_COUNTRY || 'BR'
+    this.lg = lg === undefined ? (this.lgPat ? new LgClient(this.lgPat, this.lgCountry) : null) : lg
+    this.session = this.saved?.smartLifeSession || null
     this.ready = this.saved ? this.tuya.restore(this.saved.homes) : Promise.resolve()
   }
 
   status(): SetupStatus {
     return { configured: this.saved !== null, lgTokenConfigured: this.lg !== null,
       tuyaKeysConfigured: !!this.saved?.homes.some(home => home.devices.some(device => !!device.localKey)),
-      smartLifeUserCodeConfigured: !!process.env.USER_CODE_SMARTLIFE }
+      smartLifeUserCodeConfigured: !!(this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE) }
   }
 
   async beginLogin(userCode?: unknown): Promise<string> {
     if (userCode !== undefined && typeof userCode !== 'string') throw new Error('Invalid Smart Life user code')
-    const selectedCode = (userCode as string | undefined)?.trim() || process.env.USER_CODE_SMARTLIFE
+    const selectedCode = (userCode as string | undefined)?.trim() || this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE
     if (!selectedCode) throw new Error('Smart Life user code required')
     const { token, qrUri } = await this.cloud.startLogin(selectedCode)
     this.qrToken = token
@@ -94,7 +99,6 @@ export class HomeController {
       if (!this.qrToken) throw new Error('Leia o QR code primeiro')
       this.session = await this.cloud.pollLogin(this.qrToken, this.loginUserCode || undefined)
       if (!this.session) throw new Error('Aguardando leitura do QR code no Smart Life')
-      this.loginUserCode = null
       this.qrToken = null
     }
     const [homes, acs] = await Promise.all([this.tuya.discover(this.session), this.lg.listAcs()])
@@ -112,6 +116,10 @@ export class HomeController {
       if (!validAcs.has(acId) || typeof roomId !== 'string' || !validRooms.has(roomId)) throw new Error('Invalid AC room mapping')
     }
     this.draft.acRoomIds = mapping as Record<string, string>
+    this.draft.lgPat = this.lgPat
+    this.draft.lgCountry = this.lgCountry
+    this.draft.smartLifeUserCode = this.loginUserCode || this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE
+    this.draft.smartLifeSession = this.session || undefined
     this.store.save(this.draft)
     this.saved = this.draft
     this.draft = null

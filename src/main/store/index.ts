@@ -3,12 +3,16 @@ import { config } from 'dotenv'
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { AirConditioner } from '../../shared/types'
-import type { SmartLifeHome } from '../tuya'
+import type { SmartLifeHome, SmartLifeSession } from '../tuya'
 
 export interface SavedSetup {
   homes: SmartLifeHome[]
   acs: Pick<AirConditioner, 'id' | 'name'>[]
   acRoomIds?: Record<string, string>
+  lgPat?: string
+  lgCountry?: string
+  smartLifeUserCode?: string
+  smartLifeSession?: SmartLifeSession
 }
 
 export function loadEnvironment(): void {
