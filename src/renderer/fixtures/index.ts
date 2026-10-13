@@ -4,7 +4,7 @@ const names = ['Entrada', 'Cozinha', 'Mesa de jantar', 'Sala de estar', 'Banheir
 const acRooms = new Set(['Sala de estar', 'Office', 'Quarto'])
 
 export function houseRooms(): Room[] {
-  return names.map((name, index) => ({
+  const rooms: Room[] = names.map((name, index) => ({
     id: `room-${index + 1}`,
     name,
     lights: [{
@@ -15,9 +15,16 @@ export function houseRooms(): Room[] {
     acs: acRooms.has(name) ? [{
       id: `ac-${index + 1}`,
       name: `Ar ${name}`,
-      state: { on: false, currentTemperature: 24, targetTemperature: 23, online: true, mode: 'Resfriar', fan: 'Auto', turbo: false }
+      state: { on: false, currentTemperature: 24, targetTemperature: 23, online: true, mode: 'Resfriar', fan: 'Auto', turbo: false, updatedAt: new Date().toISOString() }
     }] : []
   }))
+  const office = rooms.find(room => room.name === 'Office')!
+  office.lights = [
+    { id: 'office-switch', name: 'Luz Office', switchOnly: true, state: { on: false, online: true } },
+    ...[1, 2, 3, 4].map(number => ({ id: `office-bulb-${number}`, name: `Lâmpada Office ${number}`, state: { on: false, brightness: 70, online: true } }))
+  ]
+  rooms.find(room => room.name === 'Quarto')!.lights.push({ id: 'office-switch::2', name: 'Cortineiro', switchOnly: true, state: { on: false, online: true } })
+  return rooms
 }
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
@@ -36,6 +43,7 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
         if (light && appearance.kind === 'light.color' && light.state.color !== undefined) { light.state.color = appearance.color; return }
         if (light && appearance.kind === 'light.temperature' && light.state.temperature !== undefined) { light.state.temperature = appearance.temperature; return }
         const ac = room.acs.find(item => item.id === command.deviceId)
+        if (ac && new URLSearchParams(location.search).has('ac-error')) throw new Error('LG mock 400')
         if (ac && command.kind === 'ac.power') { ac.state.on = command.on; return }
         if (ac && command.kind === 'ac.temperature') { ac.state.targetTemperature = command.temperature; return }
         if (ac && command.kind === 'ac.mode') { ac.state.mode = command.mode; ac.state.turbo = false; return }
@@ -59,6 +67,11 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
       for (const source of found) for (const ac of source.acs) {
         const target = saved.find(room => room.id === acRoomIds[ac.id])
         if (target && target.id !== source.id) target.acs.push(structuredClone(ac))
+      }
+      for (const room of saved) room.lights = room.lights.filter(light => (acRoomIds[light.id] || room.id) === room.id)
+      for (const source of found) for (const light of source.lights) {
+        const target = saved.find(room => room.id === acRoomIds[light.id])
+        if (target && target.id !== source.id) target.lights.push(structuredClone(light))
       }
       rooms.push(...saved.filter(room => room.lights.length || room.acs.length))
       configured = true

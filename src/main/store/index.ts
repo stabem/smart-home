@@ -9,6 +9,7 @@ export interface SavedSetup {
   homes: SmartLifeHome[]
   acs: Pick<AirConditioner, 'id' | 'name'>[]
   acRoomIds?: Record<string, string>
+  lightRoomIds?: Record<string, string>
   lgPat?: string
   lgCountry?: string
   smartLifeUserCode?: string

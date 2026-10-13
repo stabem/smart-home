@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createFixtureApi, houseRooms } from './index'
+import { updatedLabel } from '../App'
 
 describe('house fixture', () => {
   it('matches the eight documented rooms and three ACs', () => {
@@ -16,5 +17,19 @@ describe('house fixture', () => {
     await api.sendCommand({ kind: 'light.power', deviceId: light.id, on: true })
     expect(before[0].lights[0].state.on).toBe(false)
     expect((await api.getRooms())[0].lights[0].state.on).toBe(true)
+  })
+
+  it('shows both Office gangs in their assigned rooms with on/off only', () => {
+    const rooms = houseRooms()
+    expect(rooms.find(room => room.name === 'Office')?.lights.map(light => light.name)).toEqual([
+      'Luz Office', 'Lâmpada Office 1', 'Lâmpada Office 2', 'Lâmpada Office 3', 'Lâmpada Office 4'
+    ])
+    expect(rooms.find(room => room.name === 'Quarto')?.lights.at(-1)).toMatchObject({ id: 'office-switch::2', name: 'Cortineiro', switchOnly: true })
+  })
+
+  it('uses local pt-BR time and agora for a fresh AC update', () => {
+    const at = '2026-10-13T19:08:20.436Z'
+    expect(updatedLabel(at, Date.parse(at) + 30_000)).toBe('Atualizado agora')
+    expect(updatedLabel(at, Date.parse(at) + 120_000)).toMatch(/^Atualizado às \d{2}:\d{2}$/)
   })
 })

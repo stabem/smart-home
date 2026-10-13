@@ -29,21 +29,34 @@ function isDeviceCommand(value: unknown): value is DeviceCommand {
   }
 }
 
-function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[], acRoomIds: Record<string, string> = {}): Room[] {
+function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[], acRoomIds: Record<string, string> = {}, lightRoomIds: Record<string, string> = {}): Room[] {
   const rooms = new Map<string, Room>()
   for (const home of homes) for (const device of home.devices) {
     if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
     const name = device.roomName || 'Sem cômodo'
     const id = `${home.id}:${device.roomId || name}`
     if (!rooms.has(id)) rooms.set(id, { id, name, lights: [], acs: [] })
-    rooms.get(id)!.lights.push({ id: device.id, name: device.name, state: { on: false, online: false } })
   }
   for (const ac of acs) {
     const name = acRoom(ac.name) || 'Sem cômodo'
-    let room = [...rooms.values()].find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())
-    if (!room) {
-      room = { id: `lg:${name}`, name, lights: [], acs: [] }
-      rooms.set(room.id, room)
+    if (![...rooms.values()].some(room => room.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      rooms.set(`lg:${name}`, { id: `lg:${name}`, name, lights: [], acs: [] })
+    }
+  }
+  for (const home of homes) for (const device of home.devices) {
+    if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
+    const name = device.roomName || 'Sem cômodo'
+    const id = `${home.id}:${device.roomId || name}`
+    const channels = device.category === 'dj' ? [] : device.channels?.length ? device.channels : [{ dp: 1, name: device.name }]
+    const lights = device.category === 'dj'
+      ? [{ id: device.id, name: device.name, state: { on: false, online: false } }]
+      : channels.map(channel => ({ id: channel.dp === 1 ? device.id : `${device.id}::${channel.dp}`,
+        name: name === 'Office' && channel.dp === 2 && /^Canal 2$/.test(channel.name) ? 'Cortineiro' : channel.name,
+        switchOnly: true, state: { on: false, online: false } }))
+    for (const light of lights) {
+      const quarto = name === 'Office' && light.id === `${device.id}::2` ? [...rooms.values()].find(room => room.name === 'Quarto') : undefined
+      const target = rooms.get(lightRoomIds[light.id]) ?? quarto ?? rooms.get(id)!
+      target.lights.push(light)
     }
   }
   for (const ac of acs) {
@@ -109,16 +122,18 @@ export class HomeController {
     return roomList(this.draft.homes, this.draft.acs)
   }
 
-  async save(acRoomIds: unknown = {}): Promise<void> {
+  async save(assignments: unknown = {}): Promise<void> {
     if (!this.draft) throw new Error('Busque dispositivos antes de salvar')
-    if (!acRoomIds || typeof acRoomIds !== 'object' || Array.isArray(acRoomIds)) throw new Error('Invalid AC room mapping')
-    const mapping = acRoomIds as Record<string, unknown>
+    if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments)) throw new Error('Invalid room mapping')
+    const mapping = assignments as Record<string, unknown>
     const validRooms = new Set(roomList(this.draft.homes, this.draft.acs).map(room => room.id))
     const validAcs = new Set(this.draft.acs.map(ac => ac.id))
-    for (const [acId, roomId] of Object.entries(mapping)) {
-      if (!validAcs.has(acId) || typeof roomId !== 'string' || !validRooms.has(roomId)) throw new Error('Invalid AC room mapping')
+    const validLights = new Set(roomList(this.draft.homes, this.draft.acs).flatMap(room => room.lights.map(light => light.id)))
+    for (const [deviceId, roomId] of Object.entries(mapping)) {
+      if ((!validAcs.has(deviceId) && !validLights.has(deviceId)) || typeof roomId !== 'string' || !validRooms.has(roomId)) throw new Error('Invalid room mapping')
     }
-    this.draft.acRoomIds = mapping as Record<string, string>
+    this.draft.acRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validAcs.has(id))) as Record<string, string>
+    this.draft.lightRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validLights.has(id))) as Record<string, string>
     this.draft.lgPat = this.lgPat
     this.draft.lgCountry = this.lgCountry
     this.draft.smartLifeUserCode = this.loginUserCode || this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE
@@ -131,7 +146,7 @@ export class HomeController {
   async rooms(): Promise<Room[]> {
     if (!this.saved) return []
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
     await Promise.all(rooms.flatMap(room => [
       ...room.lights.map(async light => { light.state = await this.tuya.getState(light.id) }),
       ...room.acs.map(ac => this.acState(ac))
@@ -148,7 +163,7 @@ export class HomeController {
     if (!isDeviceCommand(command)) throw new Error('Invalid device command')
     if (!this.saved) throw new Error('Configure devices before sending commands')
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
     const light = rooms.flatMap(room => room.lights).find(item => item.id === command.deviceId)
     const ac = rooms.flatMap(room => room.acs).find(item => item.id === command.deviceId)
     if ((command.kind === 'light.power' || command.kind === 'light.brightness' || command.kind === 'light.color' || command.kind === 'light.temperature') && light) {
@@ -165,7 +180,11 @@ export class HomeController {
           : command.kind === 'ac.mode' ? { mode: command.mode }
             : command.kind === 'ac.fan' ? { fan: command.fan }
               : { turbo: command.on }
-      await this.lg.setAc(ac.id, patch)
+      try { await this.lg.setAc(ac.id, patch) }
+      catch (error) {
+        console.error(`LG AC control failed id=${ac.id}: ${error instanceof Error ? error.message : 'UnknownError'}`)
+        throw error
+      }
       return
     }
     throw new Error('Device not found')

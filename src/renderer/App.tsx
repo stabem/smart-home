@@ -27,6 +27,14 @@ function Icon({ src, className = '' }: { src: string; className?: string }) {
   return <img className={`lineIcon ${className}`} src={src} alt="" aria-hidden="true" />
 }
 
+export function updatedLabel(value?: string, now = Date.now()): string {
+  if (!value) return 'Atualizado'
+  const time = Date.parse(value)
+  if (!Number.isFinite(time)) return 'Atualizado'
+  if (now >= time && now - time < 60_000) return 'Atualizado agora'
+  return `Atualizado às ${new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(time)}`
+}
+
 export function App({ api }: { api: SmartHomeApi }) {
   const [rooms, setRooms] = useState<Room[] | null>(null)
   const [setup, setSetup] = useState<SetupStatus | null>(null)
@@ -41,6 +49,7 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [error, setError] = useState('')
   const [userCode, setUserCode] = useState('')
   const [acRoomIds, setAcRoomIds] = useState<Record<string, string>>({})
+  const [acError, setAcError] = useState<Record<string, string>>({})
   async function refresh() { setRooms(await api.getRooms()) }
   useEffect(() => {
     void api.getRooms().then(setRooms).catch(() => setRooms([]))
@@ -48,8 +57,11 @@ export function App({ api }: { api: SmartHomeApi }) {
     void api.getLaunchAtLogin().then(setLogin).catch(() => setLogin(false))
   }, [api])
   async function command(value: DeviceCommand) {
-    try { setError(''); await api.sendCommand(value); await refresh() }
-    catch { setError('O dispositivo não respondeu. Confira se está ligado e tente novamente.') }
+    try { setError(''); await api.sendCommand(value); setAcError(current => ({ ...current, [value.deviceId]: '' })); await refresh() }
+    catch {
+      if (value.kind.startsWith('ac.')) setAcError(current => ({ ...current, [value.deviceId]: 'Ar não respondeu. Tente novamente.' }))
+      else setError('O dispositivo não respondeu. Confira se está ligado e tente novamente.')
+    }
   }
   async function turnOffAll() {
     const lights = (rooms ?? []).flatMap(room => room.lights).filter(light => light.state.online && light.state.on)
@@ -68,7 +80,7 @@ export function App({ api }: { api: SmartHomeApi }) {
   }
   async function search() {
     setBusy(true); setError('')
-    try { const devices = await api.discoverDevices(); setFound(devices); setAcRoomIds(Object.fromEntries(devices.flatMap(room => room.acs.map(ac => [ac.id, room.id])))) }
+    try { const devices = await api.discoverDevices(); setFound(devices); setAcRoomIds(Object.fromEntries(devices.flatMap(room => [...room.acs, ...room.lights].map(device => [device.id, room.id])))) }
     catch { setError('A busca falhou ou o QR ainda não foi lido. Tente novamente.') }
     finally { setBusy(false) }
   }
@@ -95,7 +107,7 @@ export function App({ api }: { api: SmartHomeApi }) {
       <button className="primaryButton" disabled={busy} onClick={() => void search()}><Motion src={scanMotion} active={busy} className="buttonMotion" />Buscar dispositivos</button>
     </section>
     {found && <section className="foundDevices"><h2>Dispositivos encontrados</h2>
-      <ul aria-label="Dispositivos encontrados">{found.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{room.lights.map(light => <li key={light.id}>{light.name}</li>)}{room.acs.map(ac => <li key={ac.id}><label>{ac.name} — Cômodo<select aria-label={`Cômodo de ${ac.name}`} value={acRoomIds[ac.id] || room.id} onChange={event => setAcRoomIds(current => ({ ...current, [ac.id]: event.target.value }))}>{found.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></li>)}</ul></li>)}</ul>
+      <ul aria-label="Dispositivos encontrados">{found.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{[...room.lights, ...room.acs].map(device => <li key={device.id}><label>{device.name} — Cômodo<select aria-label={`Cômodo de ${device.name}`} value={acRoomIds[device.id] || room.id} onChange={event => setAcRoomIds(current => ({ ...current, [device.id]: event.target.value }))}>{found.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></li>)}</ul></li>)}</ul>
       <button className="primaryButton" disabled={busy || !found.length} onClick={() => void save()}>Salvar</button>
     </section>}
     {alert}
@@ -107,8 +119,8 @@ export function App({ api }: { api: SmartHomeApi }) {
     <div className="roomControls">
       {room.lights.map(light => <section className="devicePanel" key={light.id}>
         <div className="deviceHead"><div><span className="deviceIcon lightIcon" aria-hidden="true"><Icon src={bulbIcon} /><Motion src={bulbMotion} active={light.state.on} className="bulbMotion" /></span><strong>{light.name}</strong></div><button className="lightSwitch" role="switch" aria-label={light.name} aria-checked={light.state.online && light.state.on} disabled={!light.state.online} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}><Icon src={bulbIcon} className="lampSymbol" /><span className="switchTrack" aria-hidden="true"/><span>{!light.state.online ? 'Offline' : light.state.on ? 'Ligada' : 'Desligada'}</span></button></div>
-        <label className="rangeLabel"><span>Brilho</span><input type="range" aria-label="Brilho" min="1" max="100" disabled={!light.state.online} value={light.state.brightness ?? 100} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties} onChange={event => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /><span>{light.state.brightness ?? 100}%</span></label>
-        <button className="textButton" disabled={!light.state.online} aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor <span aria-hidden="true">⌄</span></button>
+        {!light.switchOnly && <label className="rangeLabel"><span>Brilho</span><input type="range" aria-label="Brilho" min="1" max="100" disabled={!light.state.online} value={light.state.brightness ?? 100} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties} onChange={event => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /><span>{light.state.brightness ?? 100}%</span></label>}
+        {!light.switchOnly && <button className="textButton" disabled={!light.state.online} aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor <span aria-hidden="true">⌄</span></button>}
         {colorFor === light.id && <div className="appearance">
           {light.state.color !== undefined && <><div className="swatches" aria-label="Cores rápidas">{[['Âmbar', '#ffbd75'], ['Quente', '#ffe0ae'], ['Neutra', '#ffffff'], ['Fria', '#d8e9ff'], ['Azul', '#88b8e6']].map(([name, color]) => <button key={color} type="button" aria-label={`Cor ${name}`} aria-pressed={light.state.color === color} style={{ backgroundColor: color }} onClick={() => void command({ kind: 'light.color', deviceId: light.id, color })} />)}</div><label>Cor personalizada<input type="color" aria-label="Escolher cor" value={light.state.color} onChange={event => void command({ kind: 'light.color', deviceId: light.id, color: event.target.value })} /></label><span role="status" aria-label="Cor atual">{light.state.color}</span></>}
           {light.state.temperature !== undefined && <label>Temperatura da luz<input type="range" aria-label="Temperatura da luz" min="0" max="100" value={light.state.temperature} onChange={event => void command({ kind: 'light.temperature', deviceId: light.id, temperature: Number(event.target.value) })} /></label>}
@@ -123,7 +135,8 @@ export function App({ api }: { api: SmartHomeApi }) {
         <div className="acActions"><button aria-label="Modo" disabled={!ac.state.online} aria-expanded={acMenu === 'mode'} onClick={() => setAcMenu(acMenu === 'mode' ? null : 'mode')}>Modo <small>{ac.state.mode ?? '—'}</small></button><button aria-label="Ventilação" disabled={!ac.state.online} aria-expanded={acMenu === 'fan'} onClick={() => setAcMenu(acMenu === 'fan' ? null : 'fan')}>Ventilação <small>{ac.state.fan ?? '—'}</small></button><button role="switch" aria-label="Turbo" aria-checked={ac.state.turbo ?? false} disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.turbo', deviceId: ac.id, on: !ac.state.turbo })}>Turbo</button></div>
         {acMenu === 'mode' && <div className="acOptions" aria-label="Escolher modo">{(['Resfriar', 'Seco', 'Ventilar', 'Auto'] as const).map(mode => <button key={mode} aria-pressed={ac.state.mode === mode} onClick={() => { setAcMenu(null); void command({ kind: 'ac.mode', deviceId: ac.id, mode }) }}>{mode}</button>)}</div>}
         {acMenu === 'fan' && <div className="acOptions" aria-label="Escolher ventilação">{(['Auto', 'Baixa', 'Média', 'Alta'] as const).map(fan => <button key={fan} aria-pressed={ac.state.fan === fan} onClick={() => { setAcMenu(null); void command({ kind: 'ac.fan', deviceId: ac.id, fan }) }}>{fan}</button>)}</div>}
-        <p className="updated" role="status">{ac.state.online ? `Atualizado${ac.state.updatedAt ? ` ${ac.state.updatedAt}` : ''}` : 'Offline'}</p>
+        {acError[ac.id] && <p className="acError" role="alert">{acError[ac.id]}</p>}
+        <p className="updated" role="status">{ac.state.online ? updatedLabel(ac.state.updatedAt) : 'Offline'}</p>
       </section>)}
     </div>{alert}
   </main>

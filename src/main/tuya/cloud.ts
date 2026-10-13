@@ -22,6 +22,7 @@ export interface SmartLifeDevice {
   roomName?: string
   ip?: string
   version?: string
+  channels?: Array<{ dp: number; name: string }>
 }
 export interface SmartLifeHome { id: string; name: string; devices: SmartLifeDevice[] }
 
@@ -122,6 +123,20 @@ export class SmartLifeCloud {
           ip: typeof device.ip === 'string' ? device.ip : undefined,
           version: typeof device.version === 'string' ? device.version : undefined
         }
+        const entries = [device.status, device.functions].flatMap(value => Array.isArray(value) ? value :
+          value && typeof value === 'object' ? Object.entries(value).map(([code, detail]) => ({ code, ...(detail && typeof detail === 'object' ? detail : {}) })) : [])
+        const channels = new Map<number, string>()
+        for (const value of entries) {
+          if (!value || typeof value !== 'object') continue
+          const item = value as Record<string, unknown>
+          const match = /^switch_(\d+)$/.exec(String(item.code ?? ''))
+          if (match) {
+            const dp = Number(match[1])
+            const name = typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `Canal ${dp}`
+            if (!channels.has(dp) || channels.get(dp) === `Canal ${dp}`) channels.set(dp, name)
+          }
+        }
+        if (channels.size) result.channels = [...channels].map(([dp, name]) => ({ dp, name })).sort((a, b) => a.dp - b.dp)
         try {
           const room = record(await this.request(session, `/v1.0/m/thing/ha/${encodeURIComponent(result.id)}/room`))
           result.roomId = room.roomId === undefined ? undefined : String(room.roomId)
