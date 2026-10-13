@@ -1,24 +1,22 @@
 {
-  "issue": 24,
   "promise": "Tuya 3.5 LAN negotiation accepts authenticated 6699 replies; failures identify the device without secrets; a missing or expired Smart Life session can be reconnected and renewed without losing saved room assignments.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/tuya/protocol.ts",
-    "src/main/tuya/index.ts",
-    "src/main/tuya/cloud.ts",
-    "src/main/tuya/tuya.test.ts",
-    "src/main/home.ts",
+    "playwright.config.ts",
     "src/main/home.test.ts",
+    "src/main/home.ts",
     "src/main/index.ts",
+    "src/main/tuya/cloud.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/protocol.ts",
+    "src/main/tuya/tuya.test.ts",
     "src/preload/index.ts",
-    "src/shared/types.ts",
     "src/renderer/App.tsx",
-    "src/renderer/style.css",
-    "src/renderer/fixtures/index.ts",
     "src/renderer/fixtures/index.test.ts",
-    "tests/fixture.spec.ts",
-    "playwright.config.ts"
+    "src/renderer/fixtures/index.ts",
+    "src/renderer/style.css",
+    "src/shared/types.ts",
+    "tests/fixture.spec.ts"
   ],
-  "proof": "npm test -- src/main/tuya/tuya.test.ts src/main/home.test.ts src/renderer/fixtures/index.test.ts; SMART_HOME_TEST_PORT=5184 npx playwright test tests/fixture.spec.ts; sh ci/local-ci.sh",
-  "journeys": ["first-setup"]
+  "proof": "npm test -- src/main/tuya/tuya.test.ts src/main/home.test.ts src/renderer/fixtures/index.test.ts; SMART_HOME_TEST_PORT=5184 npx playwright test tests/fixture.spec.ts; sh ci/local-ci.sh"
 }
