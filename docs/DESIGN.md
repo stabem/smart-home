@@ -48,11 +48,15 @@ and vice versa).
 
 ## 3D model
 
-- three.js (`three` npm, bundled). Orthographic camera with limited orbit (yaw ±30°). The selected
-  room gets a camera flight and the home view flies back out. Floors use oak planks, light stone tiles
-  or matte plaster. Cutaway walls have thickness and pale top edges. Furniture reflects each room's
-  function. Light ON = warm pendant and point light; AC ON = cool airflow arcs by the wall unit.
-  Offline = a small `--alert` dot.
+- three.js (`three` npm, bundled). The apartment reads like a soft Spline clay model: solid, smooth
+  oak, stone and plaster tones, no visible planks, tile grid or rustic texture. Cutaway walls and
+  furniture have gently rounded edges (about 0.04–0.08 m). Matte materials carry only a faint sheen.
+  A soft hemisphere and key light, gentle contact shadows, ACES tone mapping, antialiasing and a
+  subtle panel vignette give depth without hard contrast. Pixel ratio is capped at 2.
+- Orthographic camera with limited orbit (yaw ±30°). Selecting a room flies in with about 700 ms
+  ease-in-out; returning home flies out. Labels fade during the flight. Light ON adds a soft warm
+  emissive glow and low-intensity point light. AC ON adds translucent airflow ribbons by the wall
+  unit. Offline = a small `--alert` dot. The renderer schedules zero frames while idle.
 - `prefers-reduced-motion`: camera cuts immediately and airflow arcs stay still.
 - Canvas has `aria-hidden="true"`; the room list is the accessible control surface. Each room mesh
   is also reachable by Tab through the list.

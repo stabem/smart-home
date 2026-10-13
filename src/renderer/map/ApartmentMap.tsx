@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import type { Room } from '../../shared/types'
 import { floorplan, roomSlug, type PlanArea } from './floorplan'
 
@@ -49,6 +50,7 @@ export function ApartmentMap(props: Props) {
     renderer.setSize(width, height)
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
     renderer.domElement.setAttribute('aria-hidden', 'true')
@@ -78,44 +80,46 @@ export function ApartmentMap(props: Props) {
     const styles = getComputedStyle(host)
     const color = (name: string) => styles.getPropertyValue(name).trim()
     const dark = matchMedia('(prefers-color-scheme: dark)').matches
-    scene.add(new THREE.HemisphereLight(0xfff3e5, dark ? 0x3c3936 : 0xc6bdb1, 2.2))
-    const sun = new THREE.DirectionalLight(0xffebd4, 3)
+    renderer.toneMappingExposure = dark ? 1.45 : 1.65
+    scene.add(new THREE.HemisphereLight(0xfff7ed, dark ? 0x77716c : 0xd3ccc2, 2.3))
+    const sun = new THREE.DirectionalLight(0xfff3e5, 2.6)
     sun.position.set(-5, 15, -7)
     sun.castShadow = true
-    sun.shadow.mapSize.set(1024, 1024)
+    sun.shadow.mapSize.set(2048, 2048)
     sun.shadow.camera.left = -12; sun.shadow.camera.right = 12
     sun.shadow.camera.top = 17; sun.shadow.camera.bottom = -17
     sun.shadow.bias = -.001
+    sun.shadow.radius = 5
     scene.add(sun)
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
     const textures: THREE.Texture[] = []
     const hitMeshes: THREE.Mesh[] = []
-    const rings: THREE.Object3D[] = []
-    const mat = (hex: string, roughness = .85, opacity = 1) => {
-      const material = new THREE.MeshStandardMaterial({ color: hex, roughness, transparent: opacity < 1, opacity })
+    const ribbons: THREE.Object3D[] = []
+    const labels: THREE.SpriteMaterial[] = []
+    const mat = (hex: string, roughness = .9, opacity = 1) => {
+      const material = new THREE.MeshPhysicalMaterial({ color: hex, roughness, clearcoat: .12, clearcoatRoughness: .85, transparent: opacity < 1, opacity })
       materials.push(material)
       return material
     }
-    const stone = mat(dark ? '#8f8980' : '#d8d2c8')
-    const grout = mat(dark ? '#514b46' : '#bfb7aa')
-    const oak = mat(dark ? '#aa8057' : '#bf9366')
-    const oakLight = mat(dark ? '#b58e63' : '#d5af82')
-    const oakDark = mat(dark ? '#896845' : '#a87e55')
-    const plaster = mat(dark ? '#9d958b' : '#eee9df')
-    const edge = mat(dark ? '#d3c5b3' : '#f9f4eb')
+    const stone = mat(dark ? '#aaa49d' : '#e9e5de')
+    const oak = mat(dark ? '#c6a47f' : '#d9bc98')
+    const oakLight = mat(dark ? '#d0b08c' : '#e5cba9')
+    const oakDark = mat(dark ? '#a98a70' : '#c4a484')
+    const plaster = mat(dark ? '#c0b8ad' : '#f1ece4')
+    const edge = mat(dark ? '#e4d9ca' : '#fffaf1')
     const graphite = mat(dark ? '#343333' : '#373635')
-    const fabric = mat(dark ? '#b5afa6' : '#d6d1ca')
-    const glass = mat('#9bb9c0', .15, .28)
+    const fabric = mat(dark ? '#cbc3ba' : '#e2dbd2')
+    const glass = mat('#a9c3ca', .48, .3)
     glass.depthWrite = false
     const muted = mat(dark ? '#514c46' : '#c6c0b6', 1, .65)
     const dimmed = mat(dark ? '#514c46' : '#c6c0b6', 1, .18)
-    const air = mat('#86bfe6', .3, .68)
-    air.emissive = new THREE.Color('#86bfe6'); air.emissiveIntensity = .55
-    const glow = mat('#ffd69a', .4)
-    glow.emissive = new THREE.Color('#ffc874'); glow.emissiveIntensity = 1.3
+    const air = new THREE.MeshBasicMaterial({ color: dark ? '#79bee5' : '#86bfe6', transparent: true, opacity: .62, side: THREE.DoubleSide, depthWrite: false, toneMapped: false })
+    materials.push(air)
+    const glow = mat('#ffe3b6', .72)
+    glow.emissive = new THREE.Color('#ffd493'); glow.emissiveIntensity = .8
     const box = (parent: THREE.Object3D, x: number, y: number, z: number, w: number, h: number, d: number, material: THREE.Material, shadow = true) => {
-      const geometry = new THREE.BoxGeometry(w, h, d)
+      const geometry = new RoundedBoxGeometry(w, h, d, 3, Math.min(.065, w / 4, h / 4, d / 4))
       geometries.push(geometry)
       const mesh = new THREE.Mesh(geometry, material)
       mesh.position.set(x, y, z)
@@ -150,6 +154,7 @@ export function ApartmentMap(props: Props) {
       textures.push(texture)
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: faded ? .16 : 1, depthTest: false })
       materials.push(material)
+      if (!faded) labels.push(material)
       const sprite = new THREE.Sprite(material)
       sprite.position.set(area.x + area.w / 2, 1.48, area.y + area.h / 2)
       sprite.scale.set(Math.min(area.w * .96, 3.2), .68, 1)
@@ -163,35 +168,11 @@ export function ApartmentMap(props: Props) {
       const acOn = room?.acs.some(ac => ac.state.online && ac.state.on)
       const group = new THREE.Group()
       scene.add(group)
-      const floor = box(group, area.x + area.w / 2, .01, area.y + area.h / 2, area.w, .16, area.h, dim ? dimmed : !room ? muted : plaster, false)
-      floor.userData.roomId = room?.id
-      hitMeshes.push(floor)
       const wood = ['sala-de-estar', 'office', 'quarto'].includes(area.room ?? '')
       const tiled = ['cozinha', 'banheiro', 'banheiro-da-suite'].includes(area.room ?? '')
-      if (!dim && room) {
-        if (wood) {
-          const count = Math.ceil(area.w / .2)
-          for (let i = 0; i < count; i++) {
-            const boardWidth = area.w / count
-            const x = area.x + (i + .5) * boardWidth
-            const offset = i % 2 === 0 ? 0 : .8
-            for (let start = area.y - offset; start < area.y + area.h; start += 1.6) {
-              const from = Math.max(start, area.y + .035)
-              const to = Math.min(start + 1.6, area.y + area.h - .035)
-              if (to > from + .02) box(group, x, .105, (from + to) / 2, boardWidth - .008, .025, to - from - .008, [oak, oakLight, oakDark][i % 3], false)
-            }
-          }
-        } else if (tiled) {
-          box(group, area.x + area.w / 2, .095, area.y + area.h / 2, area.w - .07, .01, area.h - .07, grout, false)
-          for (let x = area.x + .035; x < area.x + area.w - .035; x += .6) {
-            for (let z = area.y + .035; z < area.y + area.h - .035; z += .6) {
-              const width = Math.min(.6, area.x + area.w - .035 - x)
-              const depth = Math.min(.6, area.y + area.h - .035 - z)
-              box(group, x + width / 2, .108, z + depth / 2, width - .008, .025, depth - .008, stone, false)
-            }
-          }
-        }
-      }
+      const floor = box(group, area.x + area.w / 2, .01, area.y + area.h / 2, area.w, .16, area.h, dim ? dimmed : !room ? muted : wood ? oak : tiled ? stone : plaster, false)
+      floor.userData.roomId = room?.id
+      hitMeshes.push(floor)
       const wallMaterial = dim ? dimmed : !room ? muted : plaster
       // Tall back and side walls, with a low front lip and a pale cutaway top.
       for (const [x, z, w, d, h] of [
@@ -248,21 +229,32 @@ export function ApartmentMap(props: Props) {
         }
       }
       if (lit && !dim) {
-        const point = new THREE.PointLight('#ffd090', 5, Math.max(area.w, area.h) * 2.5)
+        const point = new THREE.PointLight('#ffd6a2', 2.2, Math.max(area.w, area.h) * 1.7)
         point.position.set(area.x + area.w / 2, 1.7, area.y + area.h / 2)
         group.add(point)
         disk(group, area.x + area.w / 2, 1.38, area.y + area.h / 2, .16, .06, glow)
       }
       if (acOn && !dim) {
-        box(group, area.x + area.w / 2, .72, area.y + .17, .75, .3, .18, edge)
+        box(group, area.x + area.w / 2, .76, area.y + area.h - .19, .78, .29, .17, edge)
         for (let i = 0; i < 3; i++) {
-          const geometry = new THREE.TorusGeometry(.3 + i * .19, .018, 6, 32, Math.PI * 1.4)
+          const vertices: number[] = []
+          const indices: number[] = []
+          for (let step = 0; step <= 20; step++) {
+            const t = step / 20
+            const x = area.x + area.w / 2 + (i - 1) * .23 + Math.sin(t * Math.PI) * .08
+            const y = .58 - t * .25 + Math.sin(t * Math.PI) * .08
+            const z = area.y + area.h - .42 - t * .95
+            vertices.push(x - .065, y, z, x + .065, y, z)
+            if (step < 20) { const a = step * 2; indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2) }
+          }
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3))
+          geometry.setIndex(indices)
+          geometry.computeVertexNormals()
           geometries.push(geometry)
-          const ring = new THREE.Mesh(geometry, air)
-          ring.rotation.x = -Math.PI / 2
-          ring.rotation.z = .55
-          ring.position.set(area.x + area.w / 2, .22 + i * .16, area.y + .7 + i * .34)
-          group.add(ring); rings.push(ring)
+          const ribbon = new THREE.Mesh(geometry, air)
+          ribbon.renderOrder = 2
+          group.add(ribbon); ribbons.push(ribbon)
         }
       }
       if (room && [...room.lights, ...room.acs].some(device => !device.state.online)) disk(group, area.x + area.w / 2, 1.17, area.y + area.h / 2, .08, .08, mat(color('--alert')))
@@ -299,17 +291,24 @@ export function ApartmentMap(props: Props) {
     }
     const onLeave = () => highlightRef.current(null)
     const desiredHeight = roomArea ? Math.max(roomArea.h + .2, 4.1) : 11.1
+    const startCenter = center.clone()
+    const startHeight = viewHeight
+    let flightStart: number | null = null
+    const flying = !reduced && (startCenter.distanceToSquared(endTarget) > .0001 || Math.abs(startHeight - desiredHeight) > .001)
+    if (flying) labels.forEach(material => { material.opacity = 0 })
     const animate = (time: number) => {
       if (disposed) return
       frame = 0
-      const moving = center.distanceToSquared(endTarget) > .0001 || Math.abs(viewHeight - desiredHeight) > .001
-      center.lerp(endTarget, reduced ? 1 : .14)
-      viewHeight += (desiredHeight - viewHeight) * (reduced ? 1 : .14)
-      if (!moving) { center.copy(endTarget); viewHeight = desiredHeight }
+      if (flightStart === null) flightStart = time
+      const progress = flying ? Math.min((time - flightStart) / 700, 1) : 1
+      const eased = progress * progress * (3 - 2 * progress)
+      center.copy(startCenter).lerp(endTarget, eased)
+      viewHeight = startHeight + (desiredHeight - startHeight) * eased
+      labels.forEach(material => { material.opacity = flying ? Math.min(1, Math.max(0, (progress - .35) / .65)) : 1 })
       setCamera()
-      if (!reduced) rings.forEach((ring, index) => { ring.position.y = .23 + (index % 3) * .16 + .025 * Math.sin(time / 650 + index) })
+      if (!reduced) ribbons.forEach((ribbon, index) => { ribbon.position.y = .018 * Math.sin(time / 800 + index) })
       renderer.render(scene, camera)
-      if ((!reduced && moving) || (!reduced && rings.length > 0)) wake()
+      if ((!reduced && progress < 1) || (!reduced && ribbons.length > 0)) wake()
     }
     const wake = () => { if (!disposed && !frame) frame = requestAnimationFrame(animate) }
     wake()
@@ -336,5 +335,8 @@ export function ApartmentMap(props: Props) {
       renderer.dispose()
     }
   }, [props.rooms, props.highlighted, props.selected, fallback])
-  return <div className="mapStage" ref={mount} data-map-fallback={fallback}>{fallback && <SvgPlan {...props} />}</div>
+  return <div className="mapStage" ref={mount} data-map-fallback={fallback} style={{ background: 'radial-gradient(ellipse at 50% 43%, var(--plaster-2) 22%, var(--plaster) 100%)' }}>
+    {fallback && <SvgPlan {...props} />}
+    <div aria-hidden="true" style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none', boxShadow: 'inset 0 0 30px 5px color-mix(in srgb, var(--concrete) 18%, transparent)' }} />
+  </div>
 }
