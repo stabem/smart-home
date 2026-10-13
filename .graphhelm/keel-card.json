@@ -1,14 +1,16 @@
 {
-  "promise": "After Save, the packaged app reopens for the same Windows user with LG and Smart Life credentials from the encrypted setup store; older setup files still use environment fallback, and credentials never cross renderer IPC.",
+  "promise": "Fixture users see the apartment floor plan and calm light/dark room controls while all approved accessible journey names and actions keep working; keyboard, reduced motion, axe and WebGL fallback are observed.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/index.ts",
-    "src/main/home.ts",
-    "src/main/home.test.ts",
-    "src/main/store/index.ts",
-    "src/main/store/index.test.ts",
-    "package.json"
+    "src/renderer/App.tsx",
+    "src/renderer/style.css",
+    "src/renderer/map/floorplan.ts",
+    "src/renderer/map/ApartmentMap.tsx",
+    "src/renderer/design-proof.mjs",
+    "package.json",
+    "package-lock.json",
+    "tests/"
   ],
-  "journeys": ["tray-first-setup"],
-  "proof": "npm run typecheck && npm run test -- src/main/store/index.test.ts src/main/home.test.ts && echo PROOF_OK"
+  "journeys": ["tray-toggle-room-lights", "tray-adjust-light", "tray-control-ac", "tray-first-setup"],
+  "proof": "node src/renderer/journey-proof.mjs && node src/renderer/design-proof.mjs && echo PROOF_OK"
 }
