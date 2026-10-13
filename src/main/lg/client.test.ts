@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LgClient } from './client'
+import { LgClient, type AcPatch } from './client'
 
 const profile = {
   property: {
@@ -63,6 +63,24 @@ describe('ThinQ AC client', () => {
     await expect(new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { targetTemperature: 31 }))
       .rejects.toThrow('unsupported by profile')
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { name: 'numeric string', patch: { targetTemperature: '99' } },
+    { name: 'NaN', patch: { targetTemperature: Number.NaN } },
+    { name: 'infinity', patch: { targetTemperature: Number.POSITIVE_INFINITY } },
+    { name: 'null temperature', patch: { targetTemperature: null } },
+    { name: 'string power', patch: { on: 'false' } },
+    { name: 'string turbo', patch: { turbo: 'false' } },
+    { name: 'string power save', patch: { powerSave: 'true' } },
+    { name: 'numeric mode', patch: { mode: 123 } },
+    { name: 'boolean fan', patch: { fan: true } },
+    { name: 'mixed valid and invalid fields', patch: { on: true, targetTemperature: '99' } }
+  ])('rejects wrong runtime types before any control request: $name', async ({ patch }) => {
+    const fetcher = mockFetch({ '/devices/ac-1/profile': profile, '/devices/ac-1/control': {} })
+    await expect(new LgClient('test-token', 'BR', fetcher).setAc('ac-1', patch as unknown as AcPatch))
+      .rejects.toThrow('LG AC patch value invalid')
+    expect(vi.mocked(fetcher).mock.calls.some((call) => new URL(String(call[0])).pathname.endsWith('/control'))).toBe(false)
   })
 
   it('uses the model profile for power save and legacy temperature controls', async () => {

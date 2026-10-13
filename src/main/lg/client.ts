@@ -135,7 +135,14 @@ export class LgClient {
   }
 
   async setAc(id: string, patch: AcPatch): Promise<void> {
+    if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('LG AC patch value invalid')
     if (Object.keys(patch).length === 0) throw new Error('LG AC patch empty')
+    for (const [key, value] of Object.entries(patch)) {
+      const valid = key === 'targetTemperature' ? number(value) !== undefined
+        : key === 'on' || key === 'turbo' || key === 'powerSave' ? typeof value === 'boolean'
+          : key === 'mode' || key === 'fan' ? typeof value === 'string' : false
+      if (!valid) throw new Error('LG AC patch value invalid')
+    }
     const profile = await this.getAcProfile(id)
     const controls: Json[] = []
     const add = (group: string, key: string, value: string | number | boolean): void => {
