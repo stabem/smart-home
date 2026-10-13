@@ -13,7 +13,8 @@ const api: SmartHomeApi = {
   saveSetup: (acRoomIds, groups) => ipcRenderer.invoke('setup:save', acRoomIds, groups),
   setSyncGuard: (enabled) => ipcRenderer.invoke('groups:sync-guard', enabled),
   getGroupSetup: () => ipcRenderer.invoke('groups:get'),
-  saveLightGroups: (groups) => ipcRenderer.invoke('groups:save', groups)
+  saveLightGroups: (groups) => ipcRenderer.invoke('groups:save', groups),
+  saveHomeEdits: (assignments, names, groups) => ipcRenderer.invoke('home:edit', assignments, names, groups)
 }
 
 contextBridge.exposeInMainWorld('api', api)

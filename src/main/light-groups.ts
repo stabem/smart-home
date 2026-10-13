@@ -46,7 +46,7 @@ export function applyLightGroups(rooms: Room[], groups: LightGroup[], failures: 
       const members = group.memberIds.map(id => room.lights.find(light => light.id === id)).filter((light): light is Light => !!light)
       if (members.length !== group.memberIds.length) continue
       const first = members.find(light => light.state.online)
-      const state: LightState = { ...(first?.state ?? members[0].state), on: members.some(light => light.state.on), online: members.some(light => light.state.online), viaCloud: members.some(light => light.state.viaCloud) }
+      const state: LightState = { ...(first?.state ?? members[0].state), on: members.some(light => light.state.on), online: members.some(light => light.state.online), viaCloud: members.some(light => light.state.viaCloud), stale: members.some(light => light.state.stale) }
       const firstIndex = room.lights.slice(0, room.lights.findIndex(light => light.id === members[0].id)).filter(light => !group.memberIds.includes(light.id)).length
       room.lights = room.lights.filter(light => !group.memberIds.includes(light.id))
       room.lights.splice(firstIndex, 0, { id: group.id, name: group.name, memberIds: group.memberIds, partialFailure: failures[group.id], state })

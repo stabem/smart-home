@@ -48,11 +48,13 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [setup, setSetup] = useState<SetupStatus | null>(null)
   const [found, setFound] = useState<Room[] | null>(null)
   const [groups, setGroups] = useState<LightGroup[]>([])
-  const [groupRooms, setGroupRooms] = useState<Room[] | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [editRooms, setEditRooms] = useState<Room[]>([])
+  const [editAssignments, setEditAssignments] = useState<Record<string, string>>({})
+  const [editNames, setEditNames] = useState<Record<string, string>>({})
   const [qr, setQr] = useState('')
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const [settings, setSettings] = useState(false)
   const [reconnecting, setReconnecting] = useState(false)
   const [login, setLogin] = useState(false)
   const [colorFor, setColorFor] = useState<string | null>(null)
@@ -75,7 +77,7 @@ export function App({ api }: { api: SmartHomeApi }) {
     }
   }
   async function turnOffAll() {
-    const lights = (rooms ?? []).flatMap(room => room.lights).filter(light => light.state.online && light.state.on)
+    const lights = (rooms ?? []).flatMap(room => room.lights).filter(light => light.state.online && !light.state.stale && light.state.on)
     try {
       setError('')
       await Promise.all(lights.map(light => api.sendCommand({ kind: 'light.power', deviceId: light.id, on: false })))
@@ -105,13 +107,35 @@ export function App({ api }: { api: SmartHomeApi }) {
     catch { setError('Não foi possível salvar a configuração com a proteção do sistema.') }
     finally { setBusy(false) }
   }
-  async function openGroupSettings() {
-    try { const data = await api.getGroupSetup(); setGroupRooms(data.rooms); setGroups(data.groups); setError('') }
-    catch { setError('Não foi possível abrir os grupos.') }
+  async function openEdit() {
+    try {
+      const data = await api.getGroupSetup()
+      setEditRooms(data.rooms)
+      setEditAssignments(Object.fromEntries(data.rooms.flatMap(room => [...room.lights, ...room.acs].map(device => [device.id, room.id]))))
+      setEditNames(Object.fromEntries(data.rooms.flatMap(room => room.lights.map(light => [light.id, light.name]))))
+      setGroups(data.groups)
+      setEditing(true)
+      setError('')
+    } catch { setError('Não foi possível abrir a edição da casa.') }
   }
-  async function saveGroupSettings() {
-    try { await api.saveLightGroups(groups); await refresh(); setGroupRooms(null); setError('') }
-    catch { setError('Não foi possível salvar os grupos. Confira os nomes e membros.') }
+  async function searchAgain() {
+    setBusy(true); setError('')
+    try {
+      await api.discoverDevices()
+      const data = await api.getGroupSetup()
+      setEditRooms(data.rooms)
+      const known = new Set(data.rooms.flatMap(room => [...room.lights, ...room.acs].map(device => device.id)))
+      setEditAssignments(current => ({ ...Object.fromEntries(data.rooms.flatMap(room => [...room.lights, ...room.acs].map(device => [device.id, room.id]))), ...Object.fromEntries(Object.entries(current).filter(([id]) => known.has(id))) }))
+      setEditNames(current => ({ ...Object.fromEntries(data.rooms.flatMap(room => room.lights.map(light => [light.id, light.name]))), ...Object.fromEntries(Object.entries(current).filter(([id]) => known.has(id))) }))
+      setGroups(data.groups)
+    } catch { setError('A busca falhou. Tente novamente.') }
+    finally { setBusy(false) }
+  }
+  async function saveEdit() {
+    setBusy(true); setError('')
+    try { await api.saveHomeEdits(editAssignments, editNames, groups); await refresh(); setEditing(false) }
+    catch { setError('Não foi possível salvar. Confira os nomes e grupos.') }
+    finally { setBusy(false) }
   }
   async function finishReconnect() {
     setBusy(true); setError('')
@@ -157,16 +181,37 @@ export function App({ api }: { api: SmartHomeApi }) {
     </section>}
     {alert}
   </main>
+  if (editing) return <main className="shell editScreen">
+    <header className="topbar roomTopbar"><button className="back" onClick={() => { setEditing(false); setError('') }}><Icon src={backIcon} /> <span>Voltar</span></button><h1>Editar casa</h1></header>
+    <div className="editContent">
+      <section className="editModule"><h2>Conexões</h2><button className="secondaryButton" onClick={() => setReconnecting(!reconnecting)}>Reconectar Smart Life</button>
+        {reconnecting && <div className="reconnectFlow"><label>Smart Life User Code<input autoComplete="off" value={userCode} onChange={event => setUserCode(event.target.value)} /></label><button className="secondaryButton" disabled={busy} onClick={() => void beginLogin()}>Gerar QR Smart Life</button>{qr && <><img className="qr" src={qr} alt="QR Smart Life" /><button className="primaryButton" disabled={busy} onClick={() => void finishReconnect()}>Concluir reconexão</button></>}</div>}
+        <button className="secondaryButton" disabled={busy} onClick={() => void searchAgain()}>Buscar dispositivos</button>
+      </section>
+      <section className="editModule"><h2>Luzes e cômodos</h2>{editRooms.map(room => <div className="editRoom" key={room.id}><h3>{room.name}</h3>{[...room.lights, ...room.acs].map(device => <div className="editDevice" key={device.id}>{room.lights.some(light => light.id === device.id) && <label>Nome de {device.name}<input value={editNames[device.id] ?? device.name} onChange={event => setEditNames(current => ({ ...current, [device.id]: event.target.value }))} /></label>}<label>Cômodo de {device.name}<select value={editAssignments[device.id] ?? room.id} onChange={event => {
+          const nextRoom = event.target.value
+          setEditAssignments(current => ({ ...current, [device.id]: nextRoom }))
+          if (nextRoom !== room.id) setGroups(current => current.flatMap(group => {
+            if (!group.memberIds.includes(device.id)) return [group]
+            const memberIds = group.memberIds.filter(id => id !== device.id)
+            return memberIds.length >= 2 ? [{ ...group, memberIds }] : []
+          }))
+        }}>{editRooms.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></div>)}</div>)}</section>
+      <section className="editModule"><GroupEditor rooms={editRooms.map(room => ({ ...room, lights: editRooms.flatMap(source => source.lights.filter(light => (editAssignments[light.id] ?? source.id) === room.id)) }))} groups={groups} onChange={setGroups} /></section>
+      <section className="editModule editPrefs"><label><input type="checkbox" checked={login} onChange={event => { const enabled = event.target.checked; void api.setLaunchAtLogin(enabled).then(() => setLogin(enabled)) }} /> Iniciar com o Windows</label><label><input type="checkbox" checked={setup.syncGuard !== false} onChange={event => { const enabled = event.target.checked; void api.setSyncGuard(enabled).then(refresh) }} /> Manter grupos sincronizados</label></section>
+      {alert}<button className="primaryButton editSave" disabled={busy} onClick={() => void saveEdit()}>Salvar</button>
+    </div>
+  </main>
   const room = rooms.find(item => item.id === selected)
   if (room) return <main className="shell roomScreen">
     <header className="topbar roomTopbar"><button className="back" onClick={() => { setSelected(null); setColorFor(null) }}><Icon src={backIcon} /> <span>Voltar</span></button><Icon src={homeIcon} className="topbarMark" /></header>
     <div className="roomTitle"><h1>{room.name}</h1></div>
     <div className="roomControls">
       {room.lights.map(light => <section className="devicePanel" key={light.id}>
-        <div className="deviceHead"><button className="lightSwitch" role="switch" aria-label={light.name} aria-checked={light.state.online && light.state.on} disabled={!light.state.online} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}><Icon src={bulbIcon} className="lampSymbol" /></button><div className="deviceText"><strong>{light.name}</strong><small>{!light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} {light.state.viaCloud && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small></div></div>
+        <div className="deviceHead"><button className="lightSwitch" role="switch" aria-label={light.name} aria-checked={light.state.online && light.state.on} disabled={!light.state.online || light.state.stale} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}><Icon src={bulbIcon} className="lampSymbol" /></button><div className="deviceText"><strong>{light.name}</strong><small>{light.state.stale ? 'Sem atualização' : !light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} {light.state.viaCloud && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small></div></div>
         {!!light.partialFailure?.length && <p className="groupError" role="alert">Falha em: {light.partialFailure.join(', ')}</p>}
-        {!light.switchOnly && <label className="rangeLabel"><span className="srOnly">Brilho</span><span className="sliderWrap"><span className="sliderIcon" aria-hidden="true">☼</span><input type="range" aria-label="Brilho" min="1" max="100" disabled={!light.state.online} value={light.state.brightness ?? 100} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties} onChange={event => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /></span><span>{light.state.brightness ?? 100}%</span></label>}
-        {!light.switchOnly && <button className="textButton" disabled={!light.state.online} aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor <span aria-hidden="true">⌄</span></button>}
+        {!light.switchOnly && <label className="rangeLabel"><span className="srOnly">Brilho</span><span className="sliderWrap"><span className="sliderIcon" aria-hidden="true">☼</span><input type="range" aria-label="Brilho" min="1" max="100" disabled={!light.state.online || light.state.stale} value={light.state.brightness ?? 100} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties} onChange={event => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /></span><span>{light.state.brightness ?? 100}%</span></label>}
+        {!light.switchOnly && <button className="textButton" disabled={!light.state.online || light.state.stale} aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor <span aria-hidden="true">⌄</span></button>}
         {colorFor === light.id && <div className="appearance">
           {light.state.color !== undefined && <><div className="swatches" aria-label="Cores rápidas">{[['Âmbar', '#ffbd75'], ['Quente', '#ffe0ae'], ['Neutra', '#ffffff'], ['Fria', '#d8e9ff'], ['Azul', '#88b8e6']].map(([name, color]) => <button key={color} type="button" aria-label={`Cor ${name}`} aria-pressed={light.state.color === color} style={{ backgroundColor: color }} onClick={() => void command({ kind: 'light.color', deviceId: light.id, color })} />)}</div><label>Cor personalizada<input type="color" aria-label="Escolher cor" value={light.state.color} onChange={event => void command({ kind: 'light.color', deviceId: light.id, color: event.target.value })} /></label><span role="status" aria-label="Cor atual">{light.state.color}</span></>}
           {light.state.temperature !== undefined && <label>Temperatura da luz<input type="range" aria-label="Temperatura da luz" min="0" max="100" value={light.state.temperature} onChange={event => void command({ kind: 'light.temperature', deviceId: light.id, temperature: Number(event.target.value) })} /></label>}
@@ -188,7 +233,7 @@ export function App({ api }: { api: SmartHomeApi }) {
   </main>
   const lightsOn = rooms.flatMap(item => item.lights).filter(light => light.state.online && light.state.on).length
   return <main className="shell homeScreen">
-    <header className="topbar"><div><p className="overline">Minha casa</p><h1>Casa</h1></div><div className="topbarRight"><button className="settingsButton" aria-label="Configurações" aria-expanded={settings} onClick={() => setSettings(!settings)}><Icon src={settingsIcon} /></button></div></header>
+    <header className="topbar"><div><p className="overline">Minha casa</p><h1>Casa</h1></div><div className="topbarRight"><button className="settingsButton" aria-label="Configurações" onClick={() => void openEdit()}><Icon src={settingsIcon} /></button></div></header>
     {!setup.smartLifeConnected && <section className="reconnectBanner" aria-label="Smart Life desconectado">
       <p><strong>Smart Life desconectado</strong><span>Reconecte para usar as luzes pela nuvem.</span></p>
       <button type="button" onClick={() => setReconnecting(true)}>Reconectar Smart Life</button>
@@ -198,15 +243,15 @@ export function App({ api }: { api: SmartHomeApi }) {
       <button type="button" className="secondaryButton" disabled={busy} onClick={() => void beginLogin()}>Gerar QR Smart Life</button>
       {qr && <><img className="qr" src={qr} alt="QR Smart Life" /><p className="help">Escaneie o QR com o app Smart Life.</p><button type="button" className="primaryButton" disabled={busy} onClick={() => void finishReconnect()}>Concluir reconexão</button></>}
     </section>}
-    {settings && <div className="settingsPanel"><label><input type="checkbox" checked={login} onChange={event => { const enabled = event.target.checked; void api.setLaunchAtLogin(enabled).then(() => setLogin(enabled)) }} /> Iniciar com o Windows</label><label><input type="checkbox" checked={setup.syncGuard !== false} onChange={event => { const enabled = event.target.checked; void api.setSyncGuard(enabled).then(refresh) }} /> Manter grupos sincronizados</label><button className="secondaryButton" onClick={() => groupRooms ? setGroupRooms(null) : void openGroupSettings()}>Gerenciar grupos</button>{groupRooms && <><GroupEditor rooms={groupRooms} groups={groups} onChange={setGroups} /><button className="primaryButton" onClick={() => void saveGroupSettings()}>Salvar grupos</button></>}</div>}
     <div className="homeSummary"><div><span className="summaryIcon"><Icon src={homeIcon} /></span><p><strong>{rooms.length} cômodos</strong><span>{lightsOn ? `${lightsOn} ${lightsOn === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Tudo tranquilo por aqui'}</span></p></div><button className="allOff" disabled={!lightsOn} onClick={() => void turnOffAll()}>Apagar tudo</button></div>
     <section className="roomListSection"><div className="sectionHeading"><h2>Cômodos</h2></div><ul aria-label="Cômodos" className="rooms">{rooms.map(item => {
-      const online = item.lights.every(light => light.state.online)
+      const stale = item.lights.some(light => light.state.stale)
+      const online = item.lights.every(light => light.state.online && !light.state.stale)
       const on = item.lights.length > 0 && online && item.lights.every(light => light.state.on)
       const ac = item.acs[0]
       const lit = item.lights.filter(light => light.state.on).length
       return <li className={`roomTile ${lit ? 'isLit' : ''} ${ac?.state.on ? 'isCool' : ''}`} key={item.id}>
-        <button className="roomName" aria-label={`Abrir ${item.name}`} onClick={() => setSelected(item.id)}><span className="tileIcon"><Icon src={ac ? airIcon : bulbIcon} /></span><span className="tileName">{item.name}</span><small>{!online ? 'Offline' : ac?.state.on ? `Ar ${ac.state.targetTemperature}°` : lit ? `${lit} ${lit === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Luzes apagadas'}{online && item.lights.some(light => light.state.viaCloud) && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small>{ac && <strong className="tileTemperature">{ac.state.currentTemperature ?? ac.state.targetTemperature}°</strong>}</button>
+        <button className="roomName" aria-label={`Abrir ${item.name}`} onClick={() => setSelected(item.id)}><span className="tileIcon"><Icon src={ac ? airIcon : bulbIcon} /></span><span className="tileName">{item.name}</span><small>{stale ? 'Sem atualização' : !online ? 'Offline' : ac?.state.on ? `Ar ${ac.state.targetTemperature}°` : lit ? `${lit} ${lit === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Luzes apagadas'}{online && item.lights.some(light => light.state.viaCloud) && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small>{ac && <strong className="tileTemperature">{ac.state.currentTemperature ?? ac.state.targetTemperature}°</strong>}</button>
         <button className="roomLights lightSwitch" aria-label={`Luzes ${item.name}`} aria-pressed={on} disabled={!item.lights.length || !online} title={on ? 'Desligar luzes' : 'Ligar luzes'} onClick={() => void Promise.all(item.lights.map(light => api.sendCommand({ kind: 'light.power', deviceId: light.id, on: !on }))).catch(() => setError(`Luzes de ${item.name} não responderam. Confira se estão ligadas na tomada.`)).finally(refresh)}><Icon src={bulbIcon} className="lampSymbol" /><span className="switchTrack" aria-hidden="true" /></button>
         {on && <span className="srOnly" role="status" aria-label={`${item.name} luzes ligadas`}>Ligadas</span>}
       </li>
