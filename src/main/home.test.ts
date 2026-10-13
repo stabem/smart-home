@@ -43,6 +43,7 @@ describe('main process setup and control', () => {
   })
   it('sends track members one at a time and retries one failed member once', async () => {
     const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    Object.assign(tuya, { hasLan: (lightId: string) => lightId === 'bulb-3' })
     const id = home.groupSetup().groups[0].id
     const calls: string[] = []
     let active = 0
@@ -57,7 +58,7 @@ describe('main process setup and control', () => {
       return { on: true, online: true }
     })
     await home.command({ kind: 'light.power', deviceId: id, on: true })
-    expect(calls).toEqual(['bulb-1', 'bulb-2', 'bulb-2', 'bulb-3', 'bulb-4'])
+    expect(calls).toEqual(['bulb-3', 'bulb-1', 'bulb-2', 'bulb-2', 'bulb-4'])
     expect(peak).toBe(1)
   })
 

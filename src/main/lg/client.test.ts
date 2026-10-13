@@ -94,6 +94,11 @@ describe('ThinQ AC client', () => {
       '/devices/ac-1/state': { operation: { airConOperationMode: 'POWER_ON' }, temperature: { targetTemperatureC: 23 }, airFlow: { windStrengthDetail: raw } } })
     expect((await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')).fan).toBe(label)
   })
+  it.each([['COOL', 'Resfriar'], ['AIR_DRY', 'Seco'], ['DRY', 'Seco'], ['FAN', 'Ventilar'], ['AUTO', 'Auto'], ['AI', 'Auto'], ['HEAT', 'Aquecer'], ['JET', 'Resfriar']])('labels LG mode %s as %s', async (raw, label) => {
+    const fetcher = mockFetch({ '/devices/ac-1/state': { operation: { airConOperationMode: 'POWER_ON' },
+      temperature: { targetTemperatureC: 23 }, airConJobMode: { currentJobMode: raw } } })
+    expect((await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')).mode).toBe(label)
+  })
 
   it('keeps an unreachable AC in the list as offline', async () => {
     const fetcher = mockFetch({ '/devices': [

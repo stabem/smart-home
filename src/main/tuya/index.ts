@@ -1,5 +1,5 @@
 import type { LightState } from '../../shared/types'
-import { SmartLifeCloud, type SmartLifeHome, type SmartLifeSession, type SmartLifeDevice } from './cloud'
+import { SmartLifeCloud, SmartLifeRateLimitError, type SmartLifeHome, type SmartLifeSession, type SmartLifeDevice } from './cloud'
 import { discoverLan } from './discovery'
 import { probeTcp } from './probe'
 import { isLanIp, TuyaLanClient, type Dps, type LanDevice, type TuyaVersion } from './protocol'
@@ -15,6 +15,7 @@ function channel(id: string): { id: string; dp: number } {
 }
 export class TuyaService {
   private readonly devices = new Map<string, LanDevice & { category: string }>()
+  private readonly lastStates = new Map<string, LightState>()
   private session: SmartLifeSession | null = null
   private homes: SmartLifeHome[] = []
   private addressSink: ((homes: SmartLifeHome[]) => void) | null = null
@@ -33,6 +34,8 @@ export class TuyaService {
     this.cloud.onSessionChanged = () => sink(this.homes)
   }
 
+  hasLan(id: string): boolean { return this.devices.has(channel(id).id) }
+
   async discover(session: SmartLifeSession): Promise<SmartLifeHome[]> {
     this.session = session
     this.homes = await this.cloud.listHomes(session)
@@ -46,6 +49,7 @@ export class TuyaService {
   async restore(homes: SmartLifeHome[], session?: SmartLifeSession | null): Promise<void> {
     this.session = session ?? null
     this.homes = homes
+    this.cloud.registerHomes?.(homes)
     let scrubbed = false
     for (const home of homes) for (const device of home.devices) if (device.ip && !isLanIp(device.ip)) {
       device.ip = undefined
@@ -140,7 +144,11 @@ export class TuyaService {
     const selected = channel(id)
     const device = this.devices.get(selected.id)
     if (device) {
-      try { return this.toState(device.category, await this.requestWithFallback(device), selected.dp) }
+      try {
+        const state = this.toState(device.category, await this.requestWithFallback(device), selected.dp)
+        if (state.online) this.lastStates.set(id, state)
+        return state
+      }
       catch { /* Fall through to Smart Life. */ }
     }
     return this.cloudState(selected.id, selected.dp)
@@ -184,7 +192,11 @@ export class TuyaService {
       await this.cloud.sendCommands(this.session, selected.id, commands)
       const state = await this.cloudState(selected.id, selected.dp)
       return state
-    } catch (error) { this.logFailure(`${selected.id} step=cloud-set`, device, error); return { on: false, online: false } }
+    } catch (error) {
+      this.logFailure(`${selected.id} step=cloud-set`, device, error)
+      if (error instanceof SmartLifeRateLimitError) throw error
+      return { on: false, online: false }
+    }
   }
 
   private async requestWithFallback(device: LanDevice, dps?: Dps): Promise<Dps> {
@@ -234,8 +246,16 @@ export class TuyaService {
       const temperature = status.temp_value_v2 ?? status.temp_value
       if (typeof brightness === 'number') state.brightness = Math.round(brightness / 10)
       if (typeof temperature === 'number') state.temperature = Math.round(temperature / 10)
+      this.lastStates.set(dp === 1 ? id : `${id}::${dp}`, state)
       return state
-    } catch (error) { this.logFailure(id, this.devices.get(id), error); return { on: false, online: false } }
+    } catch (error) {
+      this.logFailure(`${id} step=cloud-read`, this.devices.get(id), error)
+      if (error instanceof SmartLifeRateLimitError || this.cloud.isRateLimited?.()) {
+        const cached = this.lastStates.get(dp === 1 ? id : `${id}::${dp}`)
+        return { ...(cached ?? { on: false, online: false }), stale: true }
+      }
+      return { on: false, online: false }
+    }
   }
 
   private async populateChannels(device: SmartLifeDevice, entry: LanDevice): Promise<void> {

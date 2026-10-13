@@ -5,6 +5,7 @@ export interface LightState {
   temperature?: number
   online: boolean
   viaCloud?: boolean
+  stale?: boolean
 }
 
 export interface AcState {

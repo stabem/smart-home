@@ -3,7 +3,7 @@ import { createCipheriv } from 'node:crypto'
 import type { Socket } from 'node:net'
 import type { Socket as UdpSocket } from 'node:dgram'
 import { describe, expect, it, vi } from 'vitest'
-import { SmartLifeCloud, type SmartLifeSession } from './cloud'
+import { SmartLifeCloud, SmartLifeRateLimitError, SmartLifeRequestQueue, type SmartLifeSession } from './cloud'
 import { discoverLan } from './discovery'
 import { localSubnets, probeTcp } from './probe'
 import { TuyaService } from './index'
@@ -209,6 +209,48 @@ describe('Tuya LAN', () => {
 })
 
 describe('Smart Life QR flow', () => {
+  it('shares a two-per-second queue and backs off exponentially on the sharing limit', async () => {
+    let now = 10_000
+    const starts: number[] = []
+    const queue = new SmartLifeRequestQueue(() => now, async ms => { now += ms }, () => 0)
+    const work = async () => { starts.push(now); return true }
+    await Promise.all([queue.run(work), queue.run(work)])
+    expect(starts).toEqual([10_000, 10_500])
+    await expect(queue.run(async () => { starts.push(now); throw new SmartLifeRateLimitError('code=-9999999') })).rejects.toThrow('-9999999')
+    expect(queue.coolingDown()).toBe(true)
+    await expect(queue.run(async () => { starts.push(now); throw new SmartLifeRateLimitError('code=-9999999') })).rejects.toThrow('-9999999')
+    await queue.run(work)
+    expect(starts).toEqual([10_000, 10_500, 11_000, 13_000, 17_000])
+    expect(queue.coolingDown()).toBe(false)
+  })
+
+  it('reads status for two devices in one queued home request and caches it', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
+      { id: 'one', status: [{ code: 'switch_led', value: true }] },
+      { id: 'two', status: [{ code: 'switch_1', value: false }] }
+    ] }) })
+    let clock = 10_000
+    const queue = new SmartLifeRequestQueue(() => clock, async ms => { clock += ms }, () => 0)
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, queue)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [
+      { id: 'one', name: 'One', category: 'dj', localKey: '', homeId: 'home' },
+      { id: 'two', name: 'Two', category: 'kg', localKey: '', homeId: 'home' }
+    ] }])
+    expect(await Promise.all([cloud.deviceStatus(session, 'one'), cloud.deviceStatus(session, 'two')])).toEqual([{ switch_led: true }, { switch_1: false }])
+    expect(await cloud.deviceStatus(session, 'one')).toEqual({ switch_led: true })
+    expect(fetcher).toHaveBeenCalledOnce()
+    expect(String(fetcher.mock.calls[0][0])).toContain('/v1.0/m/life/ha/home/devices')
+  })
+  it('turns API_QPS_LIMIT_OR_DEGRADE into a shared queue cooldown', async () => {
+    let clock = 10_000
+    const queue = new SmartLifeRequestQueue(() => clock, async ms => { clock += ms }, () => 0)
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: false, code: -9999999, msg: 'API_QPS_LIMIT_OR_DEGRADE' }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, queue)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    await expect(cloud.sendCommands(session, 'one', [{ code: 'switch_1', value: true }])).rejects.toBeInstanceOf(SmartLifeRateLimitError)
+    expect(cloud.isRateLimited()).toBe(true)
+  })
   it('uses cloud channel names and device-number fallback instead of Canal 1', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: [{ ownerId: 'home', name: 'Casa' }] }) })
@@ -266,6 +308,16 @@ describe('Smart Life QR flow', () => {
 
 describe('typed light service', () => {
   const session = {} as SmartLifeSession
+
+  it('keeps the last known light state stale during Smart Life rate limiting', async () => {
+    const cloud = { registerHomes: vi.fn(), isRateLimited: vi.fn().mockReturnValue(true),
+      deviceStatus: vi.fn().mockResolvedValueOnce({ switch_led: true }).mockRejectedValueOnce(new SmartLifeRateLimitError('code=-9999999')) }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, {} as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
+    await service.restore([{ id: 'home', name: 'Casa', devices: [{ id: 'light', name: 'Luz', category: 'dj', localKey: '', homeId: 'home' }] }], session)
+    expect(await service.getState('light')).toEqual({ on: true, online: true, viaCloud: true })
+    expect(await service.getState('light')).toEqual({ on: true, online: true, viaCloud: true, stale: true })
+  })
   it('logs each LAN version and cloud failure with device context but no key', async () => {
     const key = 'abcdefghijklmnop'
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

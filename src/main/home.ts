@@ -207,7 +207,8 @@ export class HomeController {
       if (!desired) continue
       const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
       const patch = Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key))) as Partial<LightState>
-      const drifted = members.filter(light => light.state.online && Object.entries(patch).some(([key, value]) => light.state[key as keyof LightState] !== value))
+      const drifted = members.filter(light => light.state.online && !light.state.stale && Object.entries(patch).some(([key, value]) => light.state[key as keyof LightState] !== value))
+        .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
       const results = []
       for (const light of drifted) results.push(await Promise.allSettled([this.setGroupMember(light.id, patch)]).then(([result]) => result))
       this.groupFailures[group.id] = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [drifted[index].name] : [])
@@ -295,6 +296,7 @@ export class HomeController {
         : command.kind === 'light.brightness' ? { brightness: command.brightness }
           : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
       const members = rooms.flatMap(room => room.lights).filter(item => group.memberIds.includes(item.id))
+        .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
       const results = []
       for (const member of members) results.push(await Promise.allSettled([this.setGroupMember(member.id, patch)]).then(([result]) => result))
       const failed = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [members[index].name] : [])
