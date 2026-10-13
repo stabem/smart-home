@@ -3,8 +3,7 @@
   "scopePaths": [
     ".graphhelm/keel-card.json",
     "docs/DESIGN.md",
-    "src/renderer/map/**",
-    "tests/**"
+    "src/renderer/map/ApartmentMap.tsx"
   ],
   "proof": "node src/renderer/design-proof.mjs && node src/renderer/journey-proof.mjs && sh ci/local-ci.sh"
 }
