@@ -51,9 +51,9 @@ app.whenReady().then(() => {
   ipcMain.handle('rooms:list', () => home.rooms())
   ipcMain.handle('device:command', (_event, command) => home.command(command))
   ipcMain.handle('setup:status', () => home.status())
-  ipcMain.handle('setup:login', () => home.beginLogin())
+  ipcMain.handle('setup:login', (_event, userCode: unknown) => home.beginLogin(userCode))
   ipcMain.handle('setup:discover', () => home.discover())
-  ipcMain.handle('setup:save', () => home.save())
+  ipcMain.handle('setup:save', (_event, acRoomIds: unknown) => home.save(acRoomIds))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
   ipcMain.handle('login:set', (_event, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid login setting')

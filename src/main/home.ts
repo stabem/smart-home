@@ -11,32 +11,51 @@ function acRoom(name: string): string | undefined {
   return acRoomNames.find(room => normalized.includes(room.toLocaleLowerCase()))
 }
 
-function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[]): Room[] {
+function isDeviceCommand(value: unknown): value is DeviceCommand {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const command = value as Record<string, unknown>
+  if (typeof command.deviceId !== 'string' || !command.deviceId.trim()) return false
+  switch (command.kind) {
+    case 'light.power':
+    case 'ac.power': return typeof command.on === 'boolean'
+    case 'light.brightness': return Number.isInteger(command.brightness) && Number(command.brightness) >= 1 && Number(command.brightness) <= 100
+    case 'light.temperature': return Number.isInteger(command.temperature) && Number(command.temperature) >= 0 && Number(command.temperature) <= 100
+    case 'ac.temperature': return Number.isInteger(command.temperature) && Number(command.temperature) >= 16 && Number(command.temperature) <= 30
+    case 'light.color': return typeof command.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(command.color)
+    default: return false
+  }
+}
+
+function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[], acRoomIds: Record<string, string> = {}): Room[] {
   const rooms = new Map<string, Room>()
   for (const home of homes) for (const device of home.devices) {
     if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
     const name = device.roomName || 'Sem cômodo'
     const id = `${home.id}:${device.roomId || name}`
-    if (!rooms.has(id)) rooms.set(id, { id, name, lights: [] })
+    if (!rooms.has(id)) rooms.set(id, { id, name, lights: [], acs: [] })
     rooms.get(id)!.lights.push({ id: device.id, name: device.name, state: { on: false, online: false } })
   }
   for (const ac of acs) {
-    const name = acRoom(ac.name)
-    if (!name) continue
+    const name = acRoom(ac.name) || 'Sem cômodo'
     let room = [...rooms.values()].find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())
     if (!room) {
-      room = { id: `lg:${name}`, name, lights: [] }
+      room = { id: `lg:${name}`, name, lights: [], acs: [] }
       rooms.set(room.id, room)
     }
-    room.ac = { ...ac, state: offlineAc }
   }
-  return [...rooms.values()]
+  for (const ac of acs) {
+    const name = acRoom(ac.name) || 'Sem cômodo'
+    const room = rooms.get(acRoomIds[ac.id]) || [...rooms.values()].find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())!
+    room.acs.push({ ...ac, state: offlineAc })
+  }
+  return [...rooms.values()].filter(room => room.lights.length || room.acs.length)
 }
 
 export class HomeController {
   private saved: SavedSetup | null
   private draft: SavedSetup | null = null
   private qrToken: string | null = null
+  private loginUserCode: string | null = null
   private session: SmartLifeSession | null = null
   private readonly lg: LgClient | null
   private readonly ready: Promise<void>
@@ -54,12 +73,17 @@ export class HomeController {
 
   status(): SetupStatus {
     return { configured: this.saved !== null, lgTokenConfigured: this.lg !== null,
-      tuyaKeysConfigured: !!this.saved?.homes.some(home => home.devices.some(device => !!device.localKey)) }
+      tuyaKeysConfigured: !!this.saved?.homes.some(home => home.devices.some(device => !!device.localKey)),
+      smartLifeUserCodeConfigured: !!process.env.USER_CODE_SMARTLIFE }
   }
 
-  async beginLogin(): Promise<string> {
-    const { token, qrUri } = await this.cloud.startLogin(process.env.USER_CODE_SMARTLIFE)
+  async beginLogin(userCode?: unknown): Promise<string> {
+    if (userCode !== undefined && typeof userCode !== 'string') throw new Error('Invalid Smart Life user code')
+    const selectedCode = (userCode as string | undefined)?.trim() || process.env.USER_CODE_SMARTLIFE
+    if (!selectedCode) throw new Error('Smart Life user code required')
+    const { token, qrUri } = await this.cloud.startLogin(selectedCode)
     this.qrToken = token
+    this.loginUserCode = selectedCode
     this.session = null
     return qrUri
   }
@@ -68,16 +92,26 @@ export class HomeController {
     if (!this.lg) throw new Error('Token LG não configurado')
     if (!this.session) {
       if (!this.qrToken) throw new Error('Leia o QR code primeiro')
-      this.session = await this.cloud.pollLogin(this.qrToken, process.env.USER_CODE_SMARTLIFE)
+      this.session = await this.cloud.pollLogin(this.qrToken, this.loginUserCode || undefined)
       if (!this.session) throw new Error('Aguardando leitura do QR code no Smart Life')
+      this.loginUserCode = null
+      this.qrToken = null
     }
     const [homes, acs] = await Promise.all([this.tuya.discover(this.session), this.lg.listAcs()])
     this.draft = { homes, acs: acs.map(({ id, name }) => ({ id, name })) }
     return roomList(this.draft.homes, this.draft.acs)
   }
 
-  async save(): Promise<void> {
+  async save(acRoomIds: unknown = {}): Promise<void> {
     if (!this.draft) throw new Error('Busque dispositivos antes de salvar')
+    if (!acRoomIds || typeof acRoomIds !== 'object' || Array.isArray(acRoomIds)) throw new Error('Invalid AC room mapping')
+    const mapping = acRoomIds as Record<string, unknown>
+    const validRooms = new Set(roomList(this.draft.homes, this.draft.acs).map(room => room.id))
+    const validAcs = new Set(this.draft.acs.map(ac => ac.id))
+    for (const [acId, roomId] of Object.entries(mapping)) {
+      if (!validAcs.has(acId) || typeof roomId !== 'string' || !validRooms.has(roomId)) throw new Error('Invalid AC room mapping')
+    }
+    this.draft.acRoomIds = mapping as Record<string, string>
     this.store.save(this.draft)
     this.saved = this.draft
     this.draft = null
@@ -86,10 +120,10 @@ export class HomeController {
   async rooms(): Promise<Room[]> {
     if (!this.saved) return []
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds)
     await Promise.all(rooms.flatMap(room => [
       ...room.lights.map(async light => { light.state = await this.tuya.getState(light.id) }),
-      ...(room.ac ? [this.acState(room.ac)] : [])
+      ...room.acs.map(ac => this.acState(ac))
     ]))
     return rooms
   }
@@ -99,12 +133,13 @@ export class HomeController {
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
   }
 
-  async command(command: DeviceCommand): Promise<void> {
+  async command(command: unknown): Promise<void> {
+    if (!isDeviceCommand(command)) throw new Error('Invalid device command')
     if (!this.saved) throw new Error('Configure devices before sending commands')
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds)
     const light = rooms.flatMap(room => room.lights).find(item => item.id === command.deviceId)
-    const ac = rooms.map(room => room.ac).find(item => item?.id === command.deviceId)
+    const ac = rooms.flatMap(room => room.acs).find(item => item.id === command.deviceId)
     if ((command.kind === 'light.power' || command.kind === 'light.brightness' || command.kind === 'light.color' || command.kind === 'light.temperature') && light) {
       const patch = command.kind === 'light.power' ? { on: command.on }
         : command.kind === 'light.brightness' ? { brightness: command.brightness }

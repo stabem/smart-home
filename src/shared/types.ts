@@ -33,7 +33,7 @@ export interface Room {
   id: string
   name: string
   lights: Light[]
-  ac?: AirConditioner
+  acs: AirConditioner[]
 }
 
 export type DeviceCommand =
@@ -48,6 +48,7 @@ export interface SetupStatus {
   configured: boolean
   lgTokenConfigured: boolean
   tuyaKeysConfigured: boolean
+  smartLifeUserCodeConfigured: boolean
 }
 
 export interface SmartHomeApi {
@@ -56,7 +57,7 @@ export interface SmartHomeApi {
   getLaunchAtLogin(): Promise<boolean>
   setLaunchAtLogin(enabled: boolean): Promise<void>
   getSetupStatus(): Promise<SetupStatus>
-  beginSmartLifeLogin(): Promise<string>
+  beginSmartLifeLogin(userCode?: string): Promise<string>
   discoverDevices(): Promise<Room[]>
-  saveSetup(): Promise<void>
+  saveSetup(acRoomIds: Record<string, string>): Promise<void>
 }

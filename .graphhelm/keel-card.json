@@ -1,6 +1,6 @@
 {
   "issue": 5,
-  "promise": "On first run, scan Smart Life QR, discover Tuya rooms and three LG ACs, save encrypted local keys, then control devices through IPC without an offline device hanging the UI.",
+  "promise": "On first run, scan Smart Life QR with an optional User Code, discover Tuya rooms and every LG AC, assign unmatched ACs to rooms, save encrypted config, reject malformed IPC commands, and show offline lights without offering unusable controls.",
   "scopePaths": [
     "src/shared/types.ts",
     "src/preload/index.ts",

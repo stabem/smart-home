@@ -62,15 +62,40 @@ try {
   await page.getByRole('heading', { name: 'Configurar' }).waitFor()
   await page.getByRole('status', { name: 'Token LG' }).waitFor()
   await page.getByRole('status', { name: 'Chaves Tuya' }).waitFor()
+  await page.getByRole('textbox', { name: 'Smart Life User Code' }).waitFor()
+  assert.equal(await page.getByRole('textbox', { name: 'Smart Life User Code' }).inputValue(), '')
   await page.getByRole('button', { name: 'Gerar QR Smart Life' }).click()
   await page.getByRole('img', { name: 'QR Smart Life' }).waitFor()
   await page.getByRole('button', { name: 'Buscar dispositivos' }).click()
   const devices = page.getByRole('list', { name: 'Dispositivos encontrados' })
   await devices.waitFor()
   assert.equal(await devices.getByRole('listitem').count() > 0, true)
+  await devices.getByText('Bedroom AC').waitFor()
+  assert.equal(await page.getByRole('combobox', { name: 'Cômodo de Bedroom AC' }).inputValue(), 'lg:Sem cômodo')
+  await page.getByRole('combobox', { name: 'Cômodo de Bedroom AC' }).selectOption({ label: 'Office' })
   await page.getByRole('button', { name: 'Salvar' }).click()
   await page.getByRole('heading', { name: 'Casa' }).waitFor()
+  await page.getByRole('button', { name: 'Abrir Office' }).click()
+  await page.getByText('Bedroom AC').waitFor()
   process.stdout.write('tray-first-setup: passed (fixture, free port)\n')
+
+  await page.addInitScript(() => {
+    const room = { id: 'offline-room', name: 'Entrada', lights: [{ id: 'offline-light', name: 'Luz Entrada', state: { on: false, online: false } }], acs: [] }
+    globalThis.api = {
+      getRooms: async () => [room],
+      sendCommand: async () => { throw new Error('Offline light must not receive a command') },
+      getLaunchAtLogin: async () => false,
+      setLaunchAtLogin: async () => {},
+      getSetupStatus: async () => ({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: false })
+    }
+  })
+  await page.goto(`http://127.0.0.1:${address.port}/`)
+  await page.getByRole('button', { name: 'Luzes Entrada' }).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Luzes Entrada' }).isDisabled(), true)
+  await page.getByRole('button', { name: 'Abrir Entrada' }).click()
+  await page.getByRole('switch', { name: 'Luz Entrada' }).getByText('Offline').waitFor()
+  assert.equal(await page.getByRole('switch', { name: 'Luz Entrada' }).isDisabled(), true)
+  process.stdout.write('offline-light: passed (room and device controls disabled)\n')
 } finally {
   await browser?.close()
   await server.close()

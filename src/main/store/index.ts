@@ -8,6 +8,7 @@ import type { SmartLifeHome } from '../tuya'
 export interface SavedSetup {
   homes: SmartLifeHome[]
   acs: Pick<AirConditioner, 'id' | 'name'>[]
+  acRoomIds?: Record<string, string>
 }
 
 export function loadEnvironment(): void {

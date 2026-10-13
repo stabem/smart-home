@@ -12,18 +12,18 @@ export function houseRooms(): Room[] {
       name: name === 'Quarto' ? 'Luz do quarto' : `Luz ${name}`,
       state: { on: false, brightness: 70, online: true, ...(name === 'Quarto' ? { color: '#ffffff', temperature: 50 } : {}) }
     }],
-    ...(acRooms.has(name) ? { ac: {
+    acs: acRooms.has(name) ? [{
       id: `ac-${index + 1}`,
       name: `Ar ${name}`,
       state: { on: false, currentTemperature: 24, targetTemperature: 23, online: true, mode: 'Frio', fan: 'Auto', turbo: false }
-    } } : {})
+    }] : []
   }))
 }
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
   const rooms = fixture === 'house' ? houseRooms() : []
   let configured = fixture === 'house'
-  let found = false
+  let found: Room[] | null = null
   let launchAtLogin = false
   return {
     async getRooms() { return structuredClone(rooms) },
@@ -35,19 +35,29 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
         if (light && command.kind === 'light.brightness') { light.state.brightness = command.brightness; return }
         if (light && appearance.kind === 'light.color' && light.state.color !== undefined) { light.state.color = appearance.color; return }
         if (light && appearance.kind === 'light.temperature' && light.state.temperature !== undefined) { light.state.temperature = appearance.temperature; return }
-        if (room.ac?.id === command.deviceId && command.kind === 'ac.power') { room.ac.state.on = command.on; return }
-        if (room.ac?.id === command.deviceId && command.kind === 'ac.temperature') { room.ac.state.targetTemperature = command.temperature; return }
+        const ac = room.acs.find(item => item.id === command.deviceId)
+        if (ac && command.kind === 'ac.power') { ac.state.on = command.on; return }
+        if (ac && command.kind === 'ac.temperature') { ac.state.targetTemperature = command.temperature; return }
       }
       throw new Error('Dispositivo não encontrado')
     },
     async getLaunchAtLogin() { return launchAtLogin },
     async setLaunchAtLogin(enabled) { launchAtLogin = enabled },
-    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured } },
+    async getSetupStatus() { return { configured, lgTokenConfigured: true, tuyaKeysConfigured: configured, smartLifeUserCodeConfigured: false } },
     async beginSmartLifeLogin() { return 'tuyaSmart--qrLogin?token=fixture-only' },
-    async discoverDevices() { found = true; return houseRooms() },
-    async saveSetup() {
+    async discoverDevices() {
+      found = [...houseRooms(), { id: 'lg:Sem cômodo', name: 'Sem cômodo', lights: [], acs: [{ id: 'ac-unmatched', name: 'Bedroom AC', state: { on: false, targetTemperature: 23, online: false } }] }]
+      return structuredClone(found)
+    },
+    async saveSetup(acRoomIds) {
       if (!found) throw new Error('Busque dispositivos antes de salvar')
-      rooms.push(...houseRooms())
+      const saved = structuredClone(found)
+      for (const room of saved) room.acs = room.acs.filter(ac => (acRoomIds[ac.id] || room.id) === room.id)
+      for (const source of found) for (const ac of source.acs) {
+        const target = saved.find(room => room.id === acRoomIds[ac.id])
+        if (target && target.id !== source.id) target.acs.push(structuredClone(ac))
+      }
+      rooms.push(...saved.filter(room => room.lights.length || room.acs.length))
       configured = true
     }
   }
