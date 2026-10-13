@@ -92,11 +92,18 @@ export class LgClient {
       ...(body ? { body: JSON.stringify(body) } : {}),
       signal: AbortSignal.timeout(4000)
     })
-    // Never include the response body or request headers in errors: they may contain account data.
-    if (!response.ok) throw new Error(`LG API request failed (${response.status})`)
-    const payload = object(await response.json())
-    if (payload.error) throw new Error('LG API request failed')
-    if (!('response' in payload)) throw new Error('LG API response missing')
+    const payload = object(await response.json().catch(() => ({})))
+    if (!response.ok || payload.error) {
+      const error = object(payload.error)
+      const code = string(error.code)
+      const message = string(error.message)
+      const detail = [code, message].filter(Boolean).join(': ').replaceAll(this.token, '[redacted]').slice(0, 240)
+      throw new Error(`LG API request failed (${response.status})${detail ? `: ${detail}` : ''}`)
+    }
+    if (!('response' in payload)) {
+      if (body) return undefined
+      throw new Error('LG API response missing')
+    }
     return payload.response
   }
 
@@ -157,9 +164,19 @@ export class LgClient {
     }
     if (patch.on !== undefined) add('operation', 'airConOperationMode', patch.on ? 'POWER_ON' : 'POWER_OFF')
     if (patch.targetTemperature !== undefined) {
-      const temperature = object(object(profile.property ?? profile).temperature)
-      const key = 'targetTemperatureC' in temperature ? 'targetTemperatureC' : 'targetTemperature'
-      add('temperature', key, patch.targetTemperature)
+      const properties = object(profile.property ?? profile)
+      const inUnits = properties.temperatureInUnits
+      const celsius = Array.isArray(inUnits) ? inUnits.find(item => object(item).unit === 'C') : undefined
+      if (celsius) {
+        const entry = object(object(celsius).targetTemperature)
+        if (!Array.isArray(entry.mode) || !entry.mode.includes('w')) throw new Error('LG AC control unavailable: temperature.targetTemperature')
+        validateValue(entry, patch.targetTemperature)
+      } else {
+        const temperature = object(properties.temperature)
+        const key = 'targetTemperatureC' in temperature ? 'targetTemperatureC' : 'targetTemperature'
+        validateValue(capability(profile, 'temperature', key), patch.targetTemperature)
+      }
+      controls.push({ temperature: { targetTemperature: patch.targetTemperature, unit: 'C' } })
     }
     if (patch.mode !== undefined) {
       if (!modes[patch.mode]) throw new Error('LG AC mode invalid')

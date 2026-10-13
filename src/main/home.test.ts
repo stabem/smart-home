@@ -58,6 +58,15 @@ describe('main process setup and control', () => {
     await expect(home.command({ kind: 'light.power', deviceId: 'unknown', on: true })).rejects.toThrow('not found')
   })
 
+  it('logs an LG control error code without losing the failed command', async () => {
+    const { home, lg } = harness({ homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }] })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2207: Invalid command'))
+    await expect(home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })).rejects.toThrow('2207')
+    expect(log).toHaveBeenCalledWith('LG AC control failed id=ac-1: LG API request failed (400): 2207: Invalid command')
+    log.mockRestore()
+  })
+
   it('keeps every unmatched AC in Sem cômodo and saves the chosen room mapping', async () => {
     const { home, lg, store } = harness()
     lg.listAcs.mockResolvedValueOnce([
@@ -74,6 +83,38 @@ describe('main process setup and control', () => {
     expect((await home.rooms()).find(room => room.name === 'Sem cômodo')?.acs.map(ac => ac.id)).toEqual(['ac-5'])
     const reloaded = harness(store.save.mock.calls[0][0]).home
     expect((await reloaded.rooms()).find(room => room.name === 'Office')?.acs.map(ac => ac.id)).toEqual(['ac-4'])
+  })
+
+  it('splits switch gangs and persists the Quarto assignment without moving Office bulbs', async () => {
+    const twoGang: SmartLifeHome[] = [{ id: 'home-1', name: 'Casa', devices: [
+      { id: 'switch', name: 'Office wall switch', category: 'kg', localKey: 'fake-key', homeId: 'home-1', roomId: 'office', roomName: 'Office',
+        channels: [{ dp: 1, name: 'Luz Office' }, { dp: 2, name: 'Cortineiro' }] },
+      { id: 'bulb', name: 'Lâmpada Office', category: 'dj', localKey: 'fake-key', homeId: 'home-1', roomId: 'office', roomName: 'Office' },
+      { id: 'bedroom', name: 'Luz Quarto', category: 'dj', localKey: 'fake-key', homeId: 'home-1', roomId: 'bedroom', roomName: 'Quarto' }
+    ] }]
+    const initial: SavedSetup = { homes: twoGang, acs: [], lightRoomIds: { 'switch::2': 'home-1:bedroom' } }
+    const { home, tuya } = harness(initial)
+    const rooms = await home.rooms()
+    expect(rooms.find(room => room.name === 'Office')?.lights.map(light => light.name)).toEqual(['Luz Office', 'Lâmpada Office'])
+    expect(rooms.find(room => room.name === 'Quarto')?.lights.map(light => light.name)).toEqual(['Cortineiro', 'Luz Quarto'])
+    expect(rooms.find(room => room.name === 'Quarto')?.lights[0].switchOnly).toBe(true)
+    await home.command({ kind: 'light.power', deviceId: 'switch::2', on: true })
+    expect(tuya.setLight).toHaveBeenCalledWith('switch::2', { on: true })
+  })
+
+  it('saves a changed gang room in the encrypted setup payload', async () => {
+    const { home, tuya, store } = harness()
+    tuya.discover.mockResolvedValueOnce([{ id: 'home-1', name: 'Casa', devices: [
+      { id: 'switch', name: 'Office', category: 'kg', localKey: 'fake-key', homeId: 'home-1', roomId: 'office', roomName: 'Office',
+        channels: [{ dp: 1, name: 'Office' }, { dp: 2, name: 'Canal 2' }] },
+      { id: 'bedroom', name: 'Luz Quarto', category: 'dj', localKey: 'fake-key', homeId: 'home-1', roomId: 'bedroom', roomName: 'Quarto' }
+    ] }])
+    await home.beginLogin('test-code')
+    const found = await home.discover()
+    expect(found.find(room => room.name === 'Quarto')?.lights[0].name).toBe('Cortineiro')
+    await home.save({ 'switch::2': 'home-1:office' })
+    expect(store.save.mock.calls[0][0].lightRoomIds).toEqual({ 'switch::2': 'home-1:office' })
+    expect((await home.rooms()).find(room => room.name === 'Office')?.lights.map(light => light.id)).toEqual(['switch', 'switch::2'])
   })
 
   it('rejects malformed IPC commands before any device call', async () => {

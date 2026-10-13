@@ -20,6 +20,7 @@ export interface AcState {
 export interface Light {
   id: string
   name: string
+  switchOnly?: boolean
   state: LightState
 }
 

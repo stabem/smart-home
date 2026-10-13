@@ -1,24 +1,22 @@
 {
-  "promise": "The tray fixture feels like a calm macOS widget: one frosted panel, a two-column Control Center room grid, and compact light and AC controls. The four approved journeys keep their names, roles and working behavior.",
+  "promise": "Issue #20: each Tuya switch gang appears in its assigned room, LAN retries 3.3/3.4/3.5 before Offline, AC controls use the ThinQ schema and show errors, timestamps are local pt-BR, and room scrolling has no native gutter.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
+    "src/main/home.ts",
+    "src/main/home.test.ts",
+    "src/main/lg/client.ts",
+    "src/main/lg/client.test.ts",
+    "src/main/store/index.ts",
+    "src/main/tuya/cloud.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/tuya.test.ts",
+    "src/shared/types.ts",
     "src/renderer/App.tsx",
-    "src/renderer/style.css",
+    "src/renderer/fixtures/index.ts",
+    "src/renderer/fixtures/index.test.ts",
     "src/renderer/design-proof.mjs",
-    "src/renderer/journey-proof.mjs",
-    "src/renderer/map/ApartmentMap.tsx",
-    "src/renderer/map/floorplan.ts",
-    "src/main/index.ts",
-    "docs/DESIGN.md",
-    "docs/CREDITS.md",
-    "package.json",
-    "package-lock.json"
+    "src/renderer/style.css"
   ],
-  "journeys": [
-    "tray-toggle-room-lights",
-    "tray-adjust-light",
-    "tray-control-ac",
-    "tray-first-setup"
-  ],
-  "proof": "node src/renderer/journey-proof.mjs && node src/renderer/design-proof.mjs && sh ci/local-ci.sh"
+  "proof": "node src/renderer/journey-proof.mjs && node src/renderer/design-proof.mjs && sh ci/local-ci.sh",
+  "journeys": ["tray-toggle-room-lights", "tray-adjust-light", "tray-control-ac", "tray-first-setup"]
 }

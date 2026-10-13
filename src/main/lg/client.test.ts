@@ -60,10 +60,15 @@ describe('ThinQ AC client', () => {
     ])
     expect(calls.slice(1).map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
       { operation: { airConOperationMode: 'POWER_ON' } },
-      { temperature: { targetTemperatureC: 24 } },
+      { temperature: { targetTemperature: 24, unit: 'C' } },
       { airFlow: { windStrength: 'LOW' } }
     ])
-    expect(calls[1][1]).toMatchObject({ method: 'POST', headers: { 'x-conditional-control': 'true' } })
+    expect(calls[1][0]).toBe('https://api-aic.lgthinq.com/devices/ac-1/control')
+    expect(calls[1][1]).toEqual({ method: 'POST', headers: {
+      authorization: 'Bearer test-token', 'x-country': 'BR', 'x-api-key': 'v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3',
+      'x-client-id': expect.stringMatching(/^smart-home-tray-/), 'x-message-id': expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+      'x-service-phase': 'OP', 'x-conditional-control': 'true', 'content-type': 'application/json'
+    }, body: JSON.stringify({ operation: { airConOperationMode: 'POWER_ON' } }), signal: expect.any(AbortSignal) })
   })
 
   it('maps each mode, fan and turbo command to profile-checked LG values', async () => {
@@ -116,7 +121,7 @@ describe('ThinQ AC client', () => {
     const fetcher = mockFetch({ '/devices/ac-1/profile': legacyProfile, '/devices/ac-1/control': {} })
     await new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { targetTemperature: 22, powerSave: true })
     expect(vi.mocked(fetcher).mock.calls.slice(1).map((call) => JSON.parse(String(call[1]?.body)))).toEqual([
-      { temperature: { targetTemperature: 22 } },
+      { temperature: { targetTemperature: 22, unit: 'C' } },
       { powerSave: { powerSaveEnabled: true } }
     ])
   })
@@ -124,5 +129,15 @@ describe('ThinQ AC client', () => {
   it('does not put the token or response body in errors', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'test-token' } }), { status: 401 })) as unknown as typeof fetch
     await expect(new LgClient('test-token', 'BR', fetcher).listAcs()).rejects.toThrow('LG API request failed (401)')
+  })
+
+  it('uses the official temperatureInUnits profile and returns LG code and message without token', async () => {
+    const official = { property: { temperatureInUnits: [{ unit: 'C', targetTemperature: { mode: ['r', 'w'], value: { w: { min: 16, max: 30, step: 1 } } } }] } }
+    const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(new URL(url).pathname.endsWith('/profile')
+      ? { response: official } : { error: { code: '2207', message: 'Invalid command test-token' } }),
+    { status: new URL(url).pathname.endsWith('/profile') ? 200 : 400 })) as unknown as typeof fetch
+    await expect(new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { targetTemperature: 18 }))
+      .rejects.toThrow('LG API request failed (400): 2207: Invalid command [redacted]')
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[1][1]?.body))).toEqual({ temperature: { targetTemperature: 18, unit: 'C' } })
   })
 })
