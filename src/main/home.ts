@@ -21,6 +21,9 @@ function isDeviceCommand(value: unknown): value is DeviceCommand {
     case 'light.brightness': return Number.isInteger(command.brightness) && Number(command.brightness) >= 1 && Number(command.brightness) <= 100
     case 'light.temperature': return Number.isInteger(command.temperature) && Number(command.temperature) >= 0 && Number(command.temperature) <= 100
     case 'ac.temperature': return Number.isInteger(command.temperature) && Number(command.temperature) >= 16 && Number(command.temperature) <= 30
+    case 'ac.mode': return typeof command.mode === 'string' && ['Resfriar', 'Seco', 'Ventilar', 'Auto'].includes(command.mode)
+    case 'ac.fan': return typeof command.fan === 'string' && ['Auto', 'Baixa', 'Média', 'Alta'].includes(command.fan)
+    case 'ac.turbo': return typeof command.on === 'boolean'
     case 'light.color': return typeof command.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(command.color)
     default: return false
   }
@@ -156,8 +159,13 @@ export class HomeController {
       if (!state.online) throw new Error('Device offline')
       return
     }
-    if ((command.kind === 'ac.power' || command.kind === 'ac.temperature') && ac && this.lg) {
-      await this.lg.setAc(ac.id, command.kind === 'ac.power' ? { on: command.on } : { targetTemperature: command.temperature })
+    if (ac && this.lg && (command.kind === 'ac.power' || command.kind === 'ac.temperature' || command.kind === 'ac.mode' || command.kind === 'ac.fan' || command.kind === 'ac.turbo')) {
+      const patch = command.kind === 'ac.power' ? { on: command.on }
+        : command.kind === 'ac.temperature' ? { targetTemperature: command.temperature }
+          : command.kind === 'ac.mode' ? { mode: command.mode }
+            : command.kind === 'ac.fan' ? { fan: command.fan }
+              : { turbo: command.on }
+      await this.lg.setAc(ac.id, patch)
       return
     }
     throw new Error('Device not found')

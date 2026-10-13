@@ -5,6 +5,11 @@ type Json = Record<string, unknown>
 export type LgAcState = AcState & { powerSave?: boolean }
 export type AcPatch = Partial<Pick<LgAcState, 'on' | 'targetTemperature' | 'mode' | 'fan' | 'turbo' | 'powerSave'>>
 
+const modes: Record<string, string> = { Resfriar: 'COOL', Seco: 'AIR_DRY', Ventilar: 'FAN', Auto: 'AUTO' }
+const fans: Record<string, string> = { Auto: 'AUTO', Baixa: 'LOW', Média: 'MID', Alta: 'HIGH' }
+const modeNames: Record<string, string> = { COOL: 'Resfriar', AIR_DRY: 'Seco', FAN: 'Ventilar', AUTO: 'Auto', JET: 'Resfriar' }
+const fanNames: Record<string, string> = { AUTO: 'Auto', NATURE: 'Auto', LOW: 'Baixa', MID: 'Média', HIGH: 'Alta' }
+
 const API_KEY = 'v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3' // LG's published ThinQ Connect client key
 const ASIA = new Set(['AU', 'BD', 'CN', 'HK', 'ID', 'IN', 'JP', 'KH', 'KR', 'LA', 'LK', 'MM', 'MY', 'NP', 'NZ', 'PH', 'SG', 'TH', 'TW', 'VN'])
 const AMERICAS = new Set(['AG', 'AR', 'AW', 'BB', 'BO', 'BR', 'BS', 'BZ', 'CA', 'CL', 'CO', 'CR', 'CU', 'DM', 'DO', 'EC', 'GD', 'GT', 'GY', 'HN', 'HT', 'JM', 'KN', 'LC', 'MX', 'NI', 'PA', 'PE', 'PR', 'PY', 'SR', 'SV', 'TT', 'US', 'UY', 'VC', 'VE'])
@@ -112,8 +117,8 @@ export class LgClient {
       on: on === 'POWER_ON',
       currentTemperature: number(temp.currentTemperatureC ?? temp.currentTemperature),
       targetTemperature: target,
-      mode,
-      fan: string(property(report, 'airFlow', 'windStrength')),
+      mode: mode ? modeNames[mode] ?? mode : undefined,
+      fan: (() => { const value = string(property(report, 'airFlow', 'windStrength')); return value ? fanNames[value] ?? value : undefined })(),
       turbo: mode === undefined ? undefined : mode === 'JET',
       powerSave: typeof powerSave === 'boolean' ? powerSave : undefined,
       online: true,
@@ -156,12 +161,20 @@ export class LgClient {
       const key = 'targetTemperatureC' in temperature ? 'targetTemperatureC' : 'targetTemperature'
       add('temperature', key, patch.targetTemperature)
     }
-    if (patch.mode !== undefined) add('airConJobMode', 'currentJobMode', patch.mode)
-    if (patch.fan !== undefined) add('airFlow', 'windStrength', patch.fan)
+    if (patch.mode !== undefined) {
+      if (!modes[patch.mode]) throw new Error('LG AC mode invalid')
+      add('airConJobMode', 'currentJobMode', modes[patch.mode])
+    }
+    if (patch.fan !== undefined) {
+      if (!fans[patch.fan]) throw new Error('LG AC fan invalid')
+      const entry = capability(profile, 'airFlow', 'windStrength')
+      const supported = object(entry.value).w
+      const value = patch.fan === 'Auto' && Array.isArray(supported) && !supported.includes('AUTO') && supported.includes('NATURE') ? 'NATURE' : fans[patch.fan]
+      add('airFlow', 'windStrength', value)
+    }
     if (patch.turbo !== undefined) {
       if (patch.mode !== undefined) throw new Error('LG AC mode and turbo cannot be set together')
-      if (!patch.turbo) throw new Error('LG AC turbo off requires a mode')
-      add('airConJobMode', 'currentJobMode', 'JET')
+      add('airConJobMode', 'currentJobMode', patch.turbo ? 'JET' : 'COOL')
     }
     if (patch.powerSave !== undefined) add('powerSave', 'powerSaveEnabled', patch.powerSave)
     if (controls.length !== Object.keys(patch).length) throw new Error('LG AC patch has unsupported fields')

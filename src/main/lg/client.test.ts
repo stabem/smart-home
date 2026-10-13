@@ -5,8 +5,8 @@ const profile = {
   property: {
     operation: { airConOperationMode: { mode: ['r', 'w'], value: { w: ['POWER_ON', 'POWER_OFF'] } } },
     temperature: { targetTemperatureC: { mode: ['r', 'w'], value: { w: { min: 16, max: 30, step: 1 } } } },
-    airConJobMode: { currentJobMode: { mode: ['r', 'w'], value: { w: ['COOL', 'JET'] } } },
-    airFlow: { windStrength: { mode: ['r', 'w'], value: { w: ['LOW', 'HIGH'] } } }
+    airConJobMode: { currentJobMode: { mode: ['r', 'w'], value: { w: ['COOL', 'AIR_DRY', 'FAN', 'AUTO', 'JET'] } } },
+    airFlow: { windStrength: { mode: ['r', 'w'], value: { w: ['AUTO', 'LOW', 'MID', 'HIGH'] } } }
   }
 }
 
@@ -34,7 +34,7 @@ describe('ThinQ AC client', () => {
     })
     const acs = await new LgClient('test-token', 'BR', fetcher).listAcs()
     expect(acs).toMatchObject([{ id: 'ac-1', name: 'Office', state: {
-      on: true, currentTemperature: 27, targetTemperature: 23, mode: 'COOL', fan: 'HIGH', online: true
+      on: true, currentTemperature: 27, targetTemperature: 23, mode: 'Resfriar', fan: 'Alta', online: true
     } }])
     expect(fetcher).toHaveBeenCalledTimes(2)
     expect(vi.mocked(fetcher).mock.calls[0][0]).toBe('https://api-aic.lgthinq.com/devices')
@@ -53,7 +53,7 @@ describe('ThinQ AC client', () => {
 
   it('checks the profile before sending separate controls', async () => {
     const fetcher = mockFetch({ '/devices/ac-1/profile': profile, '/devices/ac-1/control': {} })
-    await new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { on: true, targetTemperature: 24, fan: 'LOW' })
+    await new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { on: true, targetTemperature: 24, fan: 'Baixa' })
     const calls = vi.mocked(fetcher).mock.calls
     expect(calls.map((call) => new URL(String(call[0])).pathname)).toEqual([
       '/devices/ac-1/profile', '/devices/ac-1/control', '/devices/ac-1/control', '/devices/ac-1/control'
@@ -64,6 +64,21 @@ describe('ThinQ AC client', () => {
       { airFlow: { windStrength: 'LOW' } }
     ])
     expect(calls[1][1]).toMatchObject({ method: 'POST', headers: { 'x-conditional-control': 'true' } })
+  })
+
+  it('maps each mode, fan and turbo command to profile-checked LG values', async () => {
+    const fetcher = mockFetch({ '/devices/ac-1/profile': profile, '/devices/ac-1/control': {} })
+    const client = new LgClient('test-token', 'BR', fetcher)
+    for (const mode of ['Resfriar', 'Seco', 'Ventilar', 'Auto']) await client.setAc('ac-1', { mode })
+    for (const fan of ['Auto', 'Baixa', 'Média', 'Alta']) await client.setAc('ac-1', { fan })
+    await client.setAc('ac-1', { turbo: true })
+    await client.setAc('ac-1', { turbo: false })
+    expect(vi.mocked(fetcher).mock.calls.filter(call => new URL(String(call[0])).pathname.endsWith('/control')).map(call => JSON.parse(String(call[1]?.body)))).toEqual([
+      ...['COOL', 'AIR_DRY', 'FAN', 'AUTO'].map(value => ({ airConJobMode: { currentJobMode: value } })),
+      ...['AUTO', 'LOW', 'MID', 'HIGH'].map(value => ({ airFlow: { windStrength: value } })),
+      { airConJobMode: { currentJobMode: 'JET' } },
+      { airConJobMode: { currentJobMode: 'COOL' } }
+    ])
   })
 
   it('rejects unsupported values before any control request', async () => {

@@ -12,3 +12,4 @@ devices.local.json
 /.mcp.json
 test-results/
 playwright-report/
+src/renderer/assets/fonts/
