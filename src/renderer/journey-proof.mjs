@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict'
 import process from 'node:process'
+import { createServer as createPortServer } from 'node:net'
 import { fileURLToPath, URL } from 'node:url'
 import { resolve } from 'node:path'
 import { chromium } from '@playwright/test'
 import { createServer } from 'vite'
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)))
-const server = await createServer({ configFile: resolve(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port: 0, strictPort: true } })
+const port = await new Promise((resolvePort, reject) => {
+  const probe = createPortServer()
+  probe.once('error', reject)
+  probe.listen(0, '127.0.0.1', () => {
+    const address = probe.address()
+    probe.close(() => resolvePort(address.port))
+  })
+})
+const server = await createServer({ configFile: resolve(root, 'vite.renderer.config.ts'), server: { host: '127.0.0.1', port, strictPort: true } })
 let browser
 try {
   await server.listen()
