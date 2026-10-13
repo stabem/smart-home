@@ -109,7 +109,7 @@ export class SmartLifeCloud {
       body: body ? JSON.stringify({ encdata: bodyData }) : undefined, signal: AbortSignal.timeout(8000) })
     if (!response.ok) throw new Error('Smart Life device request failed')
     const responseBody = record(await response.json())
-    if (responseBody.success !== true) throw new Error('Smart Life device request rejected')
+    if (responseBody.success !== true) throw new Error(`Smart Life device request rejected code=${String(responseBody.code ?? '?')} msg=${String(responseBody.msg ?? '').slice(0, 80)}`)
     return typeof responseBody.result === 'string' && responseBody.result ? decrypt(responseBody.result, secret) : responseBody.result
   }
 
