@@ -118,7 +118,8 @@ function parseDps(version: TuyaVersion, payload: Buffer): Dps {
 }
 
 export class TuyaLanClient {
-  constructor(private readonly socketFactory: (ip: string) => Socket = ip => connect(6668, ip)) {}
+  constructor(private readonly socketFactory: (ip: string) => Socket = ip => connect(6668, ip),
+    private readonly nonceFactory: () => Buffer = () => randomBytes(16)) {}
 
   async request(device: LanDevice, dps?: Dps): Promise<Dps> {
     const key = Buffer.from(device.localKey, 'utf8')
@@ -160,9 +161,17 @@ export class TuyaLanClient {
     const send = (cmd: number, data: Buffer): void => { socket.write(packFrame(device.version, session, ++seq, cmd, data)) }
     try {
       if (device.version !== '3.3') {
-        const localNonce = randomBytes(16)
+        const localNonce = this.nonceFactory()
+        if (localNonce.length !== 16) throw new Error('Invalid Tuya nonce length')
         send(3, localNonce)
-        const response = (await receive(4)).payload
+        const encryptedResponse = (await receive(4)).payload
+        // TinyTuya's 6699 unpack_message removes the encrypted return code before
+        // _negotiate_session_key_generate_step_3 sees the device nonce.
+        const response = device.version === '3.5' && encryptedResponse.length === 52
+          ? encryptedResponse.subarray(4) : encryptedResponse
+        if (device.version === '3.5' && encryptedResponse.length === 52 && encryptedResponse.readUInt32BE(0) !== 0) {
+          throw new Error('Tuya session authentication failed')
+        }
         if (response.length < 48 || !timingSafeEqual(response.subarray(16, 48), mac(key, localNonce))) {
           throw new Error('Tuya session authentication failed')
         }

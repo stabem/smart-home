@@ -139,6 +139,45 @@ describe('Tuya LAN', () => {
     expect(() => unpackFrame('3.5', key, encrypted35)).toThrow()
   })
 
+  it('decodes TinyTuya tests.py 6699 vector and rejects its modified tag', () => {
+    // TinyTuya tests.py uses LOCAL_KEY=0123456789abcdef, seq=1, cmd=16,
+    // payload={"x":1}, and a twelve-byte zero IV for this GCM case.
+    const frame = Buffer.from('00006699000000000001000000100000002300000000000000000000000039c05267c3bbf116fd97ec0e3cc6e3afcd9a9ba161236800009966', 'hex')
+    expect(unpackFrame('3.5', Buffer.from('0123456789abcdef'), frame)).toEqual({ cmd: 16, payload: Buffer.from('{"x":1}') })
+    frame[frame.length - 5] ^= 1
+    expect(() => unpackFrame('3.5', Buffer.from('0123456789abcdef'), frame)).toThrow()
+  })
+
+  it('accepts a 3.5 reply return code and uses the TinyTuya nonce-derived session key', async () => {
+    const key = Buffer.from('0123456789abcdef')
+    const localNonce = Buffer.from('0123456789abcdef')
+    const remoteNonce = Buffer.from('fedcba9876543210')
+    const responseHmac = Buffer.from('fb5b26229c20b7ed866706a2fbfae67e3f404bb6abe77ff45063a459a42924a4', 'hex')
+    const finishHmac = Buffer.from('0de373b876d33f8102b2a67aa43aaa88161b7606292f33f47db3b67fd5e2bf4e', 'hex')
+    const sessionKey = Buffer.from('34165bab783422860c0c23b2d48cf7a5', 'hex')
+    class FakeSocket extends EventEmitter {
+      write(packet: Buffer): boolean {
+        const cmd = packet.readUInt32BE(10)
+        if (cmd === 3) {
+          expect(unpackFrame('3.5', key, packet).payload).toEqual(localNonce)
+          queueMicrotask(() => this.emit('data', packFrame('3.5', key, 2, 4,
+            Buffer.concat([Buffer.alloc(4), remoteNonce, responseHmac]))))
+        } else if (cmd === 5) {
+          expect(unpackFrame('3.5', key, packet).payload).toEqual(finishHmac)
+        } else {
+          expect(cmd).toBe(16)
+          expect(unpackFrame('3.5', sessionKey, packet).payload.toString()).toContain('"protocol":5')
+          queueMicrotask(() => this.emit('data', packFrame('3.5', sessionKey, 3, 16,
+            Buffer.concat([Buffer.alloc(4), Buffer.from('{"data":{"dps":{"1":true}}}')]))))
+        }
+        return true
+      }
+      destroy(error?: Error): this { if (error) this.emit('error', error); this.emit('close'); return this }
+    }
+    const client = new TuyaLanClient(() => new FakeSocket() as unknown as Socket, () => localNonce)
+    await expect(client.request({ ...device, localKey: key.toString(), version: '3.5' })).resolves.toEqual({ '1': true })
+  })
+
   it('returns an offline failure promptly when the socket fails', async () => {
     class FakeSocket extends EventEmitter {
       write(): boolean { return true }
@@ -182,10 +221,47 @@ describe('Smart Life QR flow', () => {
     expect(fetcher.mock.calls[1][1].body).not.toContain('switch_1')
     expect(changed).toHaveBeenCalledOnce()
   })
+  it('refreshes shortly before expiry and signals the encrypted store to persist new tokens', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true,
+      result: { accessToken: 'new-token', refreshToken: 'new-refresh', expireTime: 3600 } }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const changed = vi.fn()
+    cloud.onSessionChanged = changed
+    const due: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'old-token', refreshToken: 'old-refresh',
+      expiresAt: Date.now() + 4 * 60_000, uid: 'user', terminalId: 'terminal' }
+    await cloud.refreshIfNeeded(due)
+    expect(due.accessToken).toBe('new-token')
+    expect(due.refreshToken).toBe('new-refresh')
+    expect(changed).toHaveBeenCalledOnce()
+    await cloud.refreshIfNeeded(due)
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
 })
 
 describe('typed light service', () => {
   const session = {} as SmartLifeSession
+  it('logs each LAN version and cloud failure with device context but no key', async () => {
+    const key = 'abcdefghijklmnop'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const cloud = { deviceStatus: vi.fn().mockRejectedValue(new Error('cloud unavailable')),
+        sendCommands: vi.fn().mockRejectedValue(new Error('cloud control unavailable')) }
+      const lan = { request: vi.fn().mockRejectedValue(new Error(`bad key ${key}`)) }
+      const home = [{ id: 'home', name: 'Casa', devices: [
+        { id: 'light-1', name: 'Lamp', category: 'dj', localKey: key, homeId: 'home', ip: '192.168.1.20', version: '3.5' }
+      ] }]
+      const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient,
+        vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: '192.168.1.20', version: '3.5' }]])))
+      await service.restore(home, session)
+      expect(await service.getState('light-1')).toEqual({ on: false, online: false })
+      expect(await service.setLight('light-1', { on: true })).toEqual({ on: false, online: false })
+      const lines = warn.mock.calls.map(call => String(call[0]))
+      expect(lines.some(line => line.includes('id=light-1 ip=192.168.1.20 v=3.5 err=bad key [redacted]'))).toBe(true)
+      expect(lines.some(line => line.includes('cloud unavailable'))).toBe(true)
+      expect(lines.some(line => line.includes('cloud control unavailable'))).toBe(true)
+      expect(lines.join('\n')).not.toContain(key)
+    } finally { warn.mockRestore() }
+  })
   it('ends a scan of slow open nonmatching hosts within the total deadline', async () => {
     vi.useFakeTimers()
     try {
@@ -313,7 +389,7 @@ describe('typed light service', () => {
     const homes = await service.discover(session)
     expect(homes[0].devices[0].channels).toEqual([{ dp: 1, name: 'Office' }, { dp: 2, name: 'Cortineiro' }])
     expect(lan.request.mock.calls.slice(0, 2).map(call => call[0].version)).toEqual(['3.3', '3.4'])
-    expect(warn).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(`Tuya id=switch ip=${device.ip} v=3.3 err=bad version`)
     expect(await service.getState('switch::2')).toEqual({ on: true, online: true })
     await service.setLight('switch::2', { on: false })
     expect(lan.request.mock.calls.at(-2)?.[1]).toEqual({ '2': false })
@@ -360,7 +436,7 @@ describe('typed light service', () => {
     const state = await service.getState('light-1')
     expect(state).toEqual({ on: true, online: true })
     expect(opened).toBe(2)
-    expect(warn).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(`Tuya id=light-1 ip=${device.ip} v=3.4 err=protocol mismatch`)
     warn.mockRestore()
   })
 })

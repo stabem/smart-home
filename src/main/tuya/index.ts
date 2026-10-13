@@ -19,6 +19,7 @@ export class TuyaService {
   private homes: SmartLifeHome[] = []
   private addressSink: ((homes: SmartLifeHome[]) => void) | null = null
   private timer: ReturnType<typeof setInterval> | null = null
+  private refreshTimer: ReturnType<typeof setInterval> | null = null
   private refreshing = false
   constructor(
     private readonly cloud = new SmartLifeCloud(),
@@ -59,6 +60,22 @@ export class TuyaService {
     if (this.timer) clearInterval(this.timer)
     this.timer = setInterval(() => { void this.resolveAddresses().catch(() => {}) }, 5 * 60_000)
     this.timer.unref?.()
+    const refreshSession = (): void => {
+      if (this.session && Number.isFinite(this.session.expiresAt)) {
+        void this.cloud.refreshIfNeeded(this.session).catch(error => this.logFailure('session', undefined, error))
+      }
+    }
+    if (this.refreshTimer) clearInterval(this.refreshTimer)
+    this.refreshTimer = setInterval(refreshSession, 60_000)
+    this.refreshTimer.unref?.()
+    refreshSession()
+  }
+
+  private logFailure(id: string, device: LanDevice | undefined, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error)
+    const secrets = [device?.localKey, this.session?.accessToken, this.session?.refreshToken].filter((value): value is string => !!value)
+    const safe = secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), message).replace(/[\r\n]+/g, ' ')
+    console.warn(`Tuya id=${id} ip=${device?.ip ?? 'unknown'} v=${device?.version ?? 'unknown'} err=${safe}`)
   }
 
   private async resolveAddresses(): Promise<void> {
@@ -155,13 +172,13 @@ export class TuyaService {
       try { await this.requestWithFallback(device, dps); return this.getState(id) }
       catch { /* Fall through to Smart Life. */ }
     }
-    if (!this.session) return { on: false, online: false }
+    if (!this.session) { this.logFailure(selected.id, device, 'no-session'); return { on: false, online: false } }
     try {
       const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
       await this.cloud.sendCommands(this.session, selected.id, commands)
       const state = await this.cloudState(selected.id, selected.dp)
       return state
-    } catch { return { on: false, online: false } }
+    } catch (error) { this.logFailure(selected.id, device, error); return { on: false, online: false } }
   }
 
   private async requestWithFallback(device: LanDevice, dps?: Dps): Promise<Dps> {
@@ -174,6 +191,7 @@ export class TuyaService {
         return result
       } catch (error) {
         lastError = error
+        this.logFailure(device.id, { ...device, version }, error)
       }
     }
     const cached = this.homes.flatMap(home => home.devices).find(value => value.id === device.id)
@@ -198,7 +216,7 @@ export class TuyaService {
   }
 
   private async cloudState(id: string, dp: number): Promise<LightState> {
-    if (!this.session) return { on: false, online: false }
+    if (!this.session) { this.logFailure(id, this.devices.get(id), 'no-session'); return { on: false, online: false } }
     const device = this.homes.flatMap(home => home.devices).find(value => value.id === id)
     if (!device) return { on: false, online: false }
     try {
@@ -211,7 +229,7 @@ export class TuyaService {
       if (typeof brightness === 'number') state.brightness = Math.round(brightness / 10)
       if (typeof temperature === 'number') state.temperature = Math.round(temperature / 10)
       return state
-    } catch { return { on: false, online: false } }
+    } catch (error) { this.logFailure(id, this.devices.get(id), error); return { on: false, online: false } }
   }
 
   private async populateChannels(device: SmartLifeDevice, entry: LanDevice): Promise<void> {

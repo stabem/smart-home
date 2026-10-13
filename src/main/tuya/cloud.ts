@@ -91,10 +91,7 @@ export class SmartLifeCloud {
   }
 
   private async request(session: SmartLifeSession, path: string, params?: Record<string, string>, body?: object, refreshing = false): Promise<unknown> {
-    if (!refreshing && Date.now() >= session.expiresAt - 60_000) {
-      if (!this.refreshInFlight) this.refreshInFlight = this.refreshSession(session).finally(() => { this.refreshInFlight = null })
-      await this.refreshInFlight
-    }
+    if (!refreshing) await this.refreshIfNeeded(session)
     const rid = randomUUID()
     const { hashKey, secret } = secretFor(rid, session.refreshToken)
     const encdata = params ? encrypt(params, secret) : ''
@@ -114,6 +111,12 @@ export class SmartLifeCloud {
     const responseBody = record(await response.json())
     if (responseBody.success !== true) throw new Error('Smart Life device request rejected')
     return typeof responseBody.result === 'string' && responseBody.result ? decrypt(responseBody.result, secret) : responseBody.result
+  }
+
+  async refreshIfNeeded(session: SmartLifeSession): Promise<void> {
+    if (Date.now() < session.expiresAt - 5 * 60_000) return
+    if (!this.refreshInFlight) this.refreshInFlight = this.refreshSession(session).finally(() => { this.refreshInFlight = null })
+    await this.refreshInFlight
   }
 
   private async refreshSession(session: SmartLifeSession): Promise<void> {

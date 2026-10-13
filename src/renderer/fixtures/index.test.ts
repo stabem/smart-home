@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createFixtureApi, houseRooms } from './index'
 import { updatedLabel } from '../App'
 
@@ -17,6 +17,18 @@ describe('house fixture', () => {
     await api.sendCommand({ kind: 'light.power', deviceId: light.id, on: true })
     expect(before[0].lights[0].state.on).toBe(false)
     expect((await api.getRooms())[0].lights[0].state.on).toBe(true)
+  })
+
+  it('marks a missing sharing session disconnected until QR reconnect completes', async () => {
+    vi.stubGlobal('location', { search: '?fixture=house&session=missing' })
+    try {
+      const api = createFixtureApi('house')
+      expect((await api.getSetupStatus()).smartLifeConnected).toBe(false)
+      await api.beginSmartLifeLogin()
+      await api.reconnectSmartLife()
+      expect((await api.getSetupStatus()).smartLifeConnected).toBe(true)
+      expect(await api.getRooms()).toHaveLength(8)
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('shows both Office gangs in their assigned rooms with on/off only', () => {

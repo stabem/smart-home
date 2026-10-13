@@ -96,7 +96,8 @@ export class HomeController {
   status(): SetupStatus {
     return { configured: this.saved !== null, lgTokenConfigured: this.lg !== null,
       tuyaKeysConfigured: !!this.saved?.homes.some(home => home.devices.some(device => !!device.localKey)),
-      smartLifeUserCodeConfigured: !!(this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE) }
+      smartLifeUserCodeConfigured: !!(this.saved?.smartLifeUserCode || process.env.USER_CODE_SMARTLIFE),
+      smartLifeConnected: !!this.saved?.smartLifeSession && this.saved.smartLifeSession.expiresAt > Date.now() }
   }
 
   async beginLogin(userCode?: unknown): Promise<string> {
@@ -121,6 +122,20 @@ export class HomeController {
     const [homes, acs] = await Promise.all([this.tuya.discover(this.session), this.lg.listAcs()])
     this.draft = { homes, acs: acs.map(({ id, name }) => ({ id, name })) }
     return roomList(this.draft.homes, this.draft.acs)
+  }
+
+  async reconnectSmartLife(): Promise<void> {
+    if (!this.saved || !this.qrToken) throw new Error('Leia o QR code primeiro')
+    const session = await this.cloud.pollLogin(this.qrToken, this.loginUserCode || undefined)
+    if (!session) throw new Error('Aguardando leitura do QR code no Smart Life')
+    await this.ready
+    const updated: SavedSetup = { ...this.saved, smartLifeSession: session,
+      smartLifeUserCode: this.loginUserCode || this.saved.smartLifeUserCode }
+    this.store.save(updated)
+    this.saved = updated
+    this.session = session
+    this.qrToken = null
+    await this.tuya.restore(this.saved.homes, session)
   }
 
   async save(assignments: unknown = {}): Promise<void> {
