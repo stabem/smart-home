@@ -34,7 +34,10 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     const visit = async fixture => {
       await page.goto(`${base}/?fixture=${fixture}`)
-      await page.addStyleTag({ content: `html,body,#root{min-height:100%}body{background:radial-gradient(circle at 16% 18%,#cfdae2 0,transparent 40%),radial-gradient(circle at 85% 78%,#d8b9af 0,transparent 42%),linear-gradient(135deg,#ece8e1,#c6d0d7 55%,#b8c2ca)}` })
+      const wallpaper = theme === 'dark'
+        ? 'radial-gradient(circle at 8% 82%,#a95d40 0,transparent 44%),radial-gradient(circle at 92% 16%,#4a7292 0,transparent 49%),linear-gradient(135deg,#36465e,#614b55 55%,#8a644f)'
+        : 'radial-gradient(circle at 10% 78%,#e4a98a 0,transparent 46%),radial-gradient(circle at 91% 13%,#91bdd0 0,transparent 52%),linear-gradient(135deg,#f1eadf,#c2d7d7 55%,#e2c5b5)'
+      await page.addStyleTag({ content: `html,body,#root{min-height:100%}body{background:${wallpaper}}` })
       await page.evaluate(() => globalThis.document.fonts.ready)
     }
     const capture = async name => {
@@ -61,13 +64,18 @@ try {
       await capture('home')
       await page.getByRole('button', { name: 'Abrir Office' }).click()
       await page.getByRole('heading', { name: 'Office' }).waitFor()
-      await page.screenshot({ path: resolve(output, 'office.png') })
+      await page.getByRole('button', { name: 'Cor', exact: true }).click()
+      await capture('office')
+      const positions = await page.locator('.roomControls > section').evaluateAll(elements => elements.map(element => ({ top: element.getBoundingClientRect().top, bottom: element.getBoundingClientRect().bottom })))
+      assert.ok(positions.every((position, index) => index === 0 || position.top >= positions[index - 1].bottom), 'Office modules must not overlap')
+      await page.getByRole('button', { name: 'Cor', exact: true }).click()
+      await capture('ac')
       await page.getByRole('button', { name: 'Voltar' }).click()
       await page.getByRole('button', { name: 'Abrir Quarto' }).click()
       await page.getByRole('heading', { name: 'Quarto' }).waitFor()
       await page.screenshot({ path: resolve(output, 'quarto.png') })
       await page.getByRole('switch', { name: 'Luz do quarto' }).click()
-      await page.getByRole('button', { name: 'Cor' }).click()
+      await page.getByRole('button', { name: 'Cor', exact: true }).click()
       await capture('room')
       await visit('house&ac-error=1')
       await page.getByRole('button', { name: 'Abrir Office' }).click()
@@ -81,7 +89,10 @@ try {
       await page.getByRole('button', { name: 'Voltar' }).click()
       await capture('home')
       await page.getByRole('button', { name: 'Abrir Office' }).click()
-      await capture('ac-on')
+      await page.getByRole('button', { name: 'Cor', exact: true }).click()
+      await capture('office')
+      await page.getByRole('button', { name: 'Cor', exact: true }).click()
+      await capture('ac')
     }
     if (theme === 'light') {
       await visit('empty')

@@ -34,9 +34,18 @@ describe('house fixture', () => {
   it('shows both Office gangs in their assigned rooms with on/off only', () => {
     const rooms = houseRooms()
     expect(rooms.find(room => room.name === 'Office')?.lights.map(light => light.name)).toEqual([
-      'Luz Office', 'Lâmpada Office 1', 'Lâmpada Office 2', 'Lâmpada Office 3', 'Lâmpada Office 4'
+      'Luz Office', 'Office_1', 'Office_2', 'Office_3', 'Office_4'
     ])
     expect(rooms.find(room => room.name === 'Quarto')?.lights.at(-1)).toMatchObject({ id: 'office-switch::2', name: 'Cortineiro', switchOnly: true })
+  })
+
+  it('shows the Office track as one light and fans fixture changes to its four bulbs', async () => {
+    const api = createFixtureApi('house')
+    const office = (await api.getRooms()).find(room => room.name === 'Office')!
+    expect(office.lights.map(light => light.name)).toEqual(['Luz Office', 'Trilho do Office'])
+    await api.sendCommand({ kind: 'light.power', deviceId: office.lights[1].id, on: true })
+    expect(houseRooms().find(room => room.name === 'Office')?.lights.slice(1)).toHaveLength(4)
+    expect((await api.getRooms()).find(room => room.name === 'Office')?.lights[1].state.on).toBe(true)
   })
 
   it('uses local pt-BR time and agora for a fresh AC update', () => {

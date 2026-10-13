@@ -15,7 +15,7 @@ function harness(initial: SavedSetup | null = null) {
   let saved = initial
   const store = { load: vi.fn(() => saved), save: vi.fn((value: SavedSetup) => { saved = value }) }
   const cloud = { startLogin: vi.fn(async () => ({ token: 'fake-qr', qrUri: 'tuyaSmart--qrLogin?token=fake-qr' })), pollLogin: vi.fn(async () => session) }
-  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async () => ({ on: false, online: true })), setLight: vi.fn(async () => ({ on: true, online: true })) }
+  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async (id: string) => ({ on: id === '', online: true })), setLight: vi.fn(async () => ({ on: true, online: true })) }
   const lg = { listAcs: vi.fn(async () => [
     { id: 'ac-1', name: 'Ar Sala de estar', state: { on: false, targetTemperature: 23, online: true } },
     { id: 'ac-2', name: 'Ar Office', state: { on: false, targetTemperature: 23, online: true } },
@@ -27,6 +27,48 @@ function harness(initial: SavedSetup | null = null) {
 
 describe('main process setup and control', () => {
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
+  const trackHomes: SmartLifeHome[] = [{ id: 'home', name: 'Casa', devices: [1, 2, 3, 4].map(number => ({
+    id: `bulb-${number}`, name: `Office_${number}`, category: 'dj', localKey: 'fixture-key', homeId: 'home',
+    roomId: 'office', roomName: 'Office', version: '3.4', ip: `192.0.2.${number}`
+  })) }]
+
+  it('suggests one Office track and fans commands to all four members', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const rooms = await home.rooms()
+    expect(rooms[0].lights).toHaveLength(1)
+    expect(rooms[0].lights[0]).toMatchObject({ name: 'Trilho do Office', memberIds: ['bulb-1', 'bulb-2', 'bulb-3', 'bulb-4'] })
+    await home.command({ kind: 'light.brightness', deviceId: rooms[0].lights[0].id, brightness: 62 })
+    expect(tuya.setLight).toHaveBeenCalledTimes(4)
+    expect(tuya.setLight).toHaveBeenCalledWith('bulb-4', { brightness: 62 })
+  })
+
+  it('names failed track members and reapplies the last desired state after drift', async () => {
+    const { home, tuya, store } = harness({ homes: trackHomes, acs: [] })
+    const id = (await home.rooms())[0].lights[0].id
+    tuya.setLight.mockRejectedValueOnce(new Error('offline'))
+    await expect(home.command({ kind: 'light.power', deviceId: id, on: true })).rejects.toThrow('Office_1')
+    expect(store.save).toHaveBeenCalled()
+    tuya.getState.mockImplementation(async (lightId: string) => ({ on: lightId !== 'bulb-1', online: true }))
+    tuya.setLight.mockClear()
+    await home.rooms()
+    expect(tuya.setLight).toHaveBeenCalledWith('bulb-1', { on: true })
+    expect(tuya.setLight).toHaveBeenCalledTimes(1)
+    home.setSyncGuard(false)
+    tuya.setLight.mockClear()
+    await home.rooms()
+    expect(tuya.setLight).not.toHaveBeenCalled()
+  })
+
+  it('persists edited track membership and rejects cross-room members', async () => {
+    const { home, store } = harness({ homes: trackHomes, acs: [] })
+    const { rooms, groups } = home.groupSetup()
+    expect(groups[0].name).toBe('Trilho do Office')
+    home.saveLightGroups([{ ...groups[0], name: 'Trilho principal', memberIds: ['bulb-1', 'bulb-2'] }])
+    expect((await home.rooms())[0].lights.map(light => light.name)).toEqual(['Trilho principal', 'Office_3', 'Office_4'])
+    expect(store.save).toHaveBeenCalled()
+    expect(() => home.saveLightGroups([{ ...groups[0], memberIds: ['bulb-1', 'outside'] }])).toThrow('Invalid light group member')
+    expect(rooms[0].lights).toHaveLength(4)
+  })
   it('requires discovery before save and keeps local keys out of renderer rooms', async () => {
     const { home, store } = harness()
     expect(home.status().configured).toBe(false)
@@ -38,7 +80,7 @@ describe('main process setup and control', () => {
     expect(JSON.stringify(rooms)).not.toContain('fake-key')
     await home.save()
     expect(store.save).toHaveBeenCalledOnce()
-    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true })
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true, syncGuard: true })
   })
 
   it('routes known device commands and rejects an offline light', async () => {
@@ -215,7 +257,7 @@ describe('main process setup and control', () => {
       lgPat: 'saved-lg-pat', lgCountry: 'US', smartLifeUserCode: 'saved-user-code', smartLifeSession: session }
     const { store, cloud, tuya } = harness(setup)
     const home = new HomeController(store as unknown as SetupStore, cloud as unknown as SmartLifeCloud, tuya as unknown as TuyaService)
-    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true })
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true, syncGuard: true })
     await home.rooms()
     expect(fetcher).toHaveBeenCalledOnce()
     expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({ authorization: 'Bearer saved-lg-pat', 'x-country': 'US' })

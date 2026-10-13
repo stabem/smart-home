@@ -22,8 +22,12 @@ export interface Light {
   id: string
   name: string
   switchOnly?: boolean
+  memberIds?: string[]
+  partialFailure?: string[]
   state: LightState
 }
+
+export interface LightGroup { id: string; roomId: string; name: string; memberIds: string[] }
 
 export interface AirConditioner {
   id: string
@@ -55,6 +59,7 @@ export interface SetupStatus {
   tuyaKeysConfigured: boolean
   smartLifeUserCodeConfigured: boolean
   smartLifeConnected: boolean
+  syncGuard?: boolean
 }
 
 export interface SmartHomeApi {
@@ -66,5 +71,8 @@ export interface SmartHomeApi {
   beginSmartLifeLogin(userCode?: string): Promise<string>
   reconnectSmartLife(): Promise<void>
   discoverDevices(): Promise<Room[]>
-  saveSetup(acRoomIds: Record<string, string>): Promise<void>
+  saveSetup(acRoomIds: Record<string, string>, groups?: LightGroup[]): Promise<void>
+  setSyncGuard(enabled: boolean): Promise<void>
+  getGroupSetup(): Promise<{ rooms: Room[]; groups: LightGroup[] }>
+  saveLightGroups(groups: LightGroup[]): Promise<void>
 }

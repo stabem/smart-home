@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import { config } from 'dotenv'
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { AirConditioner } from '../../shared/types'
+import type { AirConditioner, LightGroup, LightState } from '../../shared/types'
 import type { SmartLifeHome, SmartLifeSession } from '../tuya'
 
 export interface SavedSetup {
@@ -10,6 +10,9 @@ export interface SavedSetup {
   acs: Pick<AirConditioner, 'id' | 'name'>[]
   acRoomIds?: Record<string, string>
   lightRoomIds?: Record<string, string>
+  lightGroups?: LightGroup[]
+  groupLastState?: Record<string, Partial<LightState>>
+  syncGuard?: boolean
   lgPat?: string
   lgCountry?: string
   smartLifeUserCode?: string
