@@ -141,7 +141,17 @@ export function App({ api }: { api: SmartHomeApi }) {
       <button className="primaryButton" disabled={busy} onClick={() => void search()}><Motion src={scanMotion} active={busy} className="buttonMotion" />Buscar dispositivos</button>
     </section>
     {found && <section className="foundDevices"><h2>Dispositivos encontrados</h2>
-      <ul aria-label="Dispositivos encontrados">{found.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{[...room.lights, ...room.acs].map(device => <li key={device.id}><label>{device.name} — Cômodo<select aria-label={`Cômodo de ${device.name}`} value={acRoomIds[device.id] || room.id} onChange={event => setAcRoomIds(current => ({ ...current, [device.id]: event.target.value }))}>{found.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></li>)}</ul></li>)}</ul>
+      <ul aria-label="Dispositivos encontrados">{found.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{[...room.lights, ...room.acs].map(device => <li key={device.id}><label>{device.name} — Cômodo<select aria-label={`Cômodo de ${device.name}`} value={acRoomIds[device.id] || room.id} onChange={event => {
+        const nextRoom = event.target.value
+        setAcRoomIds(current => ({ ...current, [device.id]: nextRoom }))
+        if (room.lights.some(light => light.id === device.id) && nextRoom !== room.id) {
+          setGroups(current => current.flatMap(group => {
+            if (!group.memberIds.includes(device.id)) return [group]
+            const memberIds = group.memberIds.filter(id => id !== device.id)
+            return memberIds.length >= 2 ? [{ ...group, memberIds }] : []
+          }))
+        }
+      }}>{found.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></li>)}</ul></li>)}</ul>
       <GroupEditor rooms={found.map(room => ({ ...room, lights: found.flatMap(source => source.lights.filter(light => (acRoomIds[light.id] || source.id) === room.id)) }))} groups={groups} onChange={setGroups} />
       <button className="primaryButton" disabled={busy || !found.length} onClick={() => void save()}>Salvar</button>
     </section>}

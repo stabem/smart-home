@@ -20,7 +20,8 @@
     "test-results/design/light-office.png",
     "test-results/design/dark-office.png",
     "test-results/design/light-ac.png",
-    "test-results/design/dark-ac.png"
+    "test-results/design/dark-ac.png",
+    "tests/fixture.spec.ts"
   ],
   "proof": "npm test -- src/main/home.test.ts src/renderer/fixtures/index.test.ts; node src/renderer/design-proof.mjs (free port); npx playwright test tests/fixture.spec.ts (SMART_HOME_TEST_PORT set to a free non-5173 port); sh ci/local-ci.sh"
 }
