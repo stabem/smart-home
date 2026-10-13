@@ -1,8 +1,8 @@
 schema: graphhelm.journey-flow/1
 id: tray-adjust-light
 title: Change one light's brightness and color
-status: draft
-approved: null
+status: approved
+approved: {revision: 75ef00c38290089670df7d0daf370df991c2f646, digest: sha256:acae615a4c6996fc29a07e4017964f45445da0e3c7d569cee931f5349f281157}
 base: http://127.0.0.1:5173
 actors: [owner]
 secrets: []

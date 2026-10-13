@@ -1,8 +1,8 @@
 schema: graphhelm.journey-flow/1
 id: tray-toggle-room-lights
 title: Turn a room's lights on or off
-status: draft
-approved: null
+status: approved
+approved: {revision: 75ef00c38290089670df7d0daf370df991c2f646, digest: sha256:3492a30f13e447ed11d0d66a60323a01f0889295f22414ce015bf887774f799a}
 base: http://127.0.0.1:5173
 actors: [owner]
 secrets: []

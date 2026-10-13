@@ -1,8 +1,8 @@
 schema: graphhelm.journey-flow/1
 id: tray-control-ac
 title: Turn on an AC and set its temperature
-status: draft
-approved: null
+status: approved
+approved: {revision: 75ef00c38290089670df7d0daf370df991c2f646, digest: sha256:1b59e81846e45f9f74e375d6ed6e7f8993ae23702f8da2638304acf62cd0c3cf}
 base: http://127.0.0.1:5173
 actors: [owner, lg-thinq]
 secrets: []

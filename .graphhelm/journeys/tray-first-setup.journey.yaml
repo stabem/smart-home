@@ -1,8 +1,8 @@
 schema: graphhelm.journey-flow/1
 id: tray-first-setup
 title: "First run, find the devices"
-status: draft
-approved: null
+status: approved
+approved: {revision: 75ef00c38290089670df7d0daf370df991c2f646, digest: sha256:0771f92f74a61df32d471fd78c6ad7be88a0357c1db60f192e1a7aa595e326d4}
 base: http://127.0.0.1:5173
 actors: [owner, tuya-cloud, lg-thinq]
 secrets: []
