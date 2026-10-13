@@ -16,17 +16,29 @@ export class TuyaService {
   ) {}
 
   async discover(session: SmartLifeSession): Promise<SmartLifeHome[]> {
-    const [homes, addresses] = await Promise.all([this.cloud.listHomes(session), this.scan()])
+    const [homes, addresses] = await Promise.all([this.cloud.listHomes(session), this.scan().catch(() => new Map())])
     this.devices.clear()
     for (const home of homes) for (const device of home.devices) {
       const lan = addresses.get(device.id)
       const version = lan?.version ?? device.version
-      if (!lan || !device.localKey || !['3.3', '3.4', '3.5'].includes(version ?? '')) continue
-      device.ip = lan.ip
+      if (!device.localKey || !['3.3', '3.4', '3.5'].includes(version ?? '')) continue
+      device.ip = lan?.ip ?? device.ip
       device.version = version
-      this.devices.set(device.id, { id: device.id, ip: lan.ip, localKey: device.localKey, version: version as TuyaVersion, category: device.category })
+      if (device.ip) this.devices.set(device.id, { id: device.id, ip: device.ip, localKey: device.localKey, version: version as TuyaVersion, category: device.category })
     }
     return homes
+  }
+
+  async restore(homes: SmartLifeHome[]): Promise<void> {
+    const addresses = await this.scan().catch(() => new Map())
+    this.devices.clear()
+    for (const home of homes) for (const device of home.devices) {
+      const ip = addresses.get(device.id)?.ip ?? device.ip
+      const version = addresses.get(device.id)?.version ?? device.version
+      if (ip && device.localKey && ['3.3', '3.4', '3.5'].includes(version ?? '')) {
+        this.devices.set(device.id, { id: device.id, ip, localKey: device.localKey, version: version as TuyaVersion, category: device.category })
+      }
+    }
   }
 
   async getState(id: string): Promise<LightState> {

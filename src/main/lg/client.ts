@@ -85,7 +85,7 @@ export class LgClient {
         ...(body ? { 'content-type': 'application/json', 'x-conditional-control': 'true' } : {})
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(4000)
     })
     // Never include the response body or request headers in errors: they may contain account data.
     if (!response.ok) throw new Error(`LG API request failed (${response.status})`)
@@ -130,7 +130,8 @@ export class LgClient {
       const id = string(device.deviceId)
       if (!id) throw new Error('LG AC id missing')
       const info = object(device.deviceInfo)
-      return { id, name: string(info.alias) ?? string(info.modelName) ?? 'LG AC', state: await this.getAcState(id) }
+      const state = await this.getAcState(id).catch((): AcState => ({ on: false, targetTemperature: 23, online: false }))
+      return { id, name: string(info.alias) ?? string(info.modelName) ?? 'LG AC', state }
     }))
   }
 
