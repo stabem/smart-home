@@ -59,6 +59,7 @@ app.whenReady().then(() => {
   ipcMain.handle('groups:sync-guard', (_event, enabled: unknown) => home.setSyncGuard(enabled))
   ipcMain.handle('groups:get', () => home.groupSetup())
   ipcMain.handle('groups:save', (_event, groups: unknown) => home.saveLightGroups(groups))
+  ipcMain.handle('home:edit', (_event, assignments: unknown, names: unknown, groups: unknown) => home.saveHomeEdits(assignments, names, groups))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
   ipcMain.handle('login:set', (_event, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid login setting')

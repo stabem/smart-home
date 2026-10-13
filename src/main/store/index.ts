@@ -10,6 +10,7 @@ export interface SavedSetup {
   acs: Pick<AirConditioner, 'id' | 'name'>[]
   acRoomIds?: Record<string, string>
   lightRoomIds?: Record<string, string>
+  lightNames?: Record<string, string>
   lightGroups?: LightGroup[]
   groupLastState?: Record<string, Partial<LightState>>
   syncGuard?: boolean

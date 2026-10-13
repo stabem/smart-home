@@ -73,7 +73,8 @@ export class TuyaService {
 
   private logFailure(id: string, device: LanDevice | undefined, error: unknown): void {
     const message = error instanceof Error ? error.message : String(error)
-    const secrets = [device?.localKey, this.session?.accessToken, this.session?.refreshToken].filter((value): value is string => !!value)
+    const secrets = [device?.localKey, this.session?.accessToken, this.session?.refreshToken,
+      ...this.homes.flatMap(home => home.devices.map(item => item.localKey))].filter((value): value is string => !!value)
     const safe = secrets.reduce((value, secret) => value.replaceAll(secret, '[redacted]'), message).replace(/[\r\n]+/g, ' ')
     console.warn(`Tuya id=${id} ip=${device?.ip ?? 'unknown'} v=${device?.version ?? 'unknown'} err=${safe}`)
   }
@@ -169,16 +170,21 @@ export class TuyaService {
     }
     if (!Object.keys(dps).length) return this.getState(id)
     if (device) {
-      try { await this.requestWithFallback(device, dps); return this.getState(id) }
-      catch { /* Fall through to Smart Life. */ }
+      try {
+        await this.lan.request(device, dps)
+        const state = await this.getState(id)
+        if (state.online) return state
+        throw new Error('LAN set was not confirmed by status')
+      }
+      catch (error) { this.logFailure(`${selected.id} step=lan-set`, device, error) }
     }
-    if (!this.session) { this.logFailure(selected.id, device, 'no-session'); return { on: false, online: false } }
+    if (!this.session) { this.logFailure(`${selected.id} step=cloud-set`, device, 'no-session'); return { on: false, online: false } }
     try {
       const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
       await this.cloud.sendCommands(this.session, selected.id, commands)
       const state = await this.cloudState(selected.id, selected.dp)
       return state
-    } catch (error) { this.logFailure(selected.id, device, error); return { on: false, online: false } }
+    } catch (error) { this.logFailure(`${selected.id} step=cloud-set`, device, error); return { on: false, online: false } }
   }
 
   private async requestWithFallback(device: LanDevice, dps?: Dps): Promise<Dps> {
@@ -239,7 +245,7 @@ export class TuyaService {
       const discovered: number[] = []
       for (let dp = 1; typeof dps[String(dp)] === 'boolean'; dp++) discovered.push(dp)
       const names = new Map(device.channels?.map(item => [item.dp, item.name]) ?? [])
-      for (const dp of discovered) if (!names.has(dp)) names.set(dp, dp === 1 ? device.name : `Canal ${dp}`)
+      for (const dp of discovered) if (!names.has(dp)) names.set(dp, `${device.name} ${dp}`)
       if (names.size) device.channels = [...names].map(([dp, name]) => ({ dp, name })).sort((a, b) => a.dp - b.dp)
     } catch { /* The device stays visible and getState will report offline after retries. */ }
   }

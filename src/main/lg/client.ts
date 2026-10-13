@@ -8,7 +8,7 @@ export type AcPatch = Partial<Pick<LgAcState, 'on' | 'targetTemperature' | 'mode
 const modes: Record<string, string> = { Resfriar: 'COOL', Seco: 'AIR_DRY', Ventilar: 'FAN', Auto: 'AUTO' }
 const fans: Record<string, string> = { Auto: 'AUTO', Baixa: 'LOW', Média: 'MID', Alta: 'HIGH' }
 const modeNames: Record<string, string> = { COOL: 'Resfriar', AIR_DRY: 'Seco', FAN: 'Ventilar', AUTO: 'Auto', JET: 'Resfriar' }
-const fanNames: Record<string, string> = { AUTO: 'Auto', NATURE: 'Auto', LOW: 'Baixa', MID: 'Média', HIGH: 'Alta' }
+const fanNames: Record<string, string> = { AUTO: 'Auto', NATURE: 'Auto', LOW: 'Baixa', LOW_MID: 'Média-baixa', MID: 'Média', MID_HIGH: 'Média-alta', HIGH: 'Alta', POWER: 'Turbo' }
 
 const API_KEY = 'v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3' // LG's published ThinQ Connect client key
 const ASIA = new Set(['AU', 'BD', 'CN', 'HK', 'ID', 'IN', 'JP', 'KH', 'KR', 'LA', 'LK', 'MM', 'MY', 'NP', 'NZ', 'PH', 'SG', 'TH', 'TW', 'VN'])

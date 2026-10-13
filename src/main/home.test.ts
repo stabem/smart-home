@@ -15,7 +15,7 @@ function harness(initial: SavedSetup | null = null) {
   let saved = initial
   const store = { load: vi.fn(() => saved), save: vi.fn((value: SavedSetup) => { saved = value }) }
   const cloud = { startLogin: vi.fn(async () => ({ token: 'fake-qr', qrUri: 'tuyaSmart--qrLogin?token=fake-qr' })), pollLogin: vi.fn(async () => session) }
-  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async (id: string) => ({ on: id === '', online: true })), setLight: vi.fn(async () => ({ on: true, online: true })) }
+  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async (id: string) => ({ on: id === '', online: true })), setLight: vi.fn(async (id: string) => ({ on: !!id, online: true })) }
   const lg = { listAcs: vi.fn(async () => [
     { id: 'ac-1', name: 'Ar Sala de estar', state: { on: false, targetTemperature: 23, online: true } },
     { id: 'ac-2', name: 'Ar Office', state: { on: false, targetTemperature: 23, online: true } },
@@ -41,11 +41,30 @@ describe('main process setup and control', () => {
     expect(tuya.setLight).toHaveBeenCalledTimes(4)
     expect(tuya.setLight).toHaveBeenCalledWith('bulb-4', { brightness: 62 })
   })
+  it('sends track members one at a time and retries one failed member once', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const id = home.groupSetup().groups[0].id
+    const calls: string[] = []
+    let active = 0
+    let peak = 0
+    tuya.setLight.mockImplementation(async (lightId: string) => {
+      calls.push(lightId)
+      active++
+      peak = Math.max(peak, active)
+      await Promise.resolve()
+      active--
+      if (lightId === 'bulb-2' && calls.filter(value => value === lightId).length === 1) throw new Error('timeout')
+      return { on: true, online: true }
+    })
+    await home.command({ kind: 'light.power', deviceId: id, on: true })
+    expect(calls).toEqual(['bulb-1', 'bulb-2', 'bulb-2', 'bulb-3', 'bulb-4'])
+    expect(peak).toBe(1)
+  })
 
   it('names failed track members and reapplies the last desired state after drift', async () => {
     const { home, tuya, store } = harness({ homes: trackHomes, acs: [] })
     const id = (await home.rooms())[0].lights[0].id
-    tuya.setLight.mockRejectedValueOnce(new Error('offline'))
+    tuya.setLight.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
     await expect(home.command({ kind: 'light.power', deviceId: id, on: true })).rejects.toThrow('Office_1')
     expect(store.save).toHaveBeenCalled()
     tuya.getState.mockImplementation(async (lightId: string) => ({ on: lightId !== 'bulb-1', online: true }))
@@ -68,6 +87,21 @@ describe('main process setup and control', () => {
     expect(store.save).toHaveBeenCalled()
     expect(() => home.saveLightGroups([{ ...groups[0], memberIds: ['bulb-1', 'outside'] }])).toThrow('Invalid light group member')
     expect(rooms[0].lights).toHaveLength(4)
+  })
+  it('saves light names and room assignments without losing encrypted setup fields', async () => {
+    const editedHomes = structuredClone(trackHomes)
+    editedHomes[0].devices.push({ id: 'bedroom', name: 'Luz Quarto', category: 'dj', localKey: 'fixture-key', homeId: 'home', roomId: 'bedroom', roomName: 'Quarto' })
+    const initial: SavedSetup = { homes: editedHomes, acs: [{ id: 'ac-1', name: 'Ar Office' }],
+      smartLifeSession: session, smartLifeUserCode: 'code', syncGuard: false, groupLastState: { old: { on: true } } }
+    const { home, store } = harness(initial)
+    const before = home.groupSetup()
+    const mapping = Object.fromEntries(before.rooms.flatMap(room => [...room.lights, ...room.acs].map(device => [device.id, room.id])))
+    mapping['bulb-1'] = before.rooms.find(room => room.name === 'Quarto')!.id
+    home.saveHomeEdits(mapping, { 'bulb-1': 'Luz da mesa' }, [{ ...before.groups[0], name: 'Trilho principal', memberIds: ['bulb-2', 'bulb-3', 'bulb-4'] }])
+    expect(home.groupSetup().rooms.find(room => room.name === 'Quarto')?.lights.some(light => light.name === 'Luz da mesa')).toBe(true)
+    expect(home.groupSetup().groups[0].name).toBe('Trilho principal')
+    expect(store.save).toHaveBeenCalledWith(expect.objectContaining({ smartLifeSession: session, smartLifeUserCode: 'code', syncGuard: false }))
+    expect(() => home.saveHomeEdits(mapping, { 'bulb-1': '' }, [])).toThrow('Invalid light name')
   })
   it('requires discovery before save and keeps local keys out of renderer rooms', async () => {
     const { home, store } = harness()
@@ -154,7 +188,7 @@ describe('main process setup and control', () => {
     ] }])
     await home.beginLogin('test-code')
     const found = await home.discover()
-    expect(found.find(room => room.name === 'Quarto')?.lights[0].name).toBe('Cortineiro')
+    expect(found.find(room => room.name === 'Quarto')?.lights[0].name).toBe('Office 2')
     await home.save({ 'switch::2': 'home-1:office' })
     expect(store.save.mock.calls[0][0].lightRoomIds).toEqual({ 'switch::2': 'home-1:office' })
     expect((await home.rooms()).find(room => room.name === 'Office')?.lights.map(light => light.id)).toEqual(['switch', 'switch::2'])

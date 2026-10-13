@@ -40,9 +40,10 @@ function ungcm(data: Buffer, key: Buffer, iv: Buffer, aad: Buffer): Buffer {
 const mac = (key: Buffer, data: Buffer): Buffer => createHmac('sha256', key).update(data).digest()
 const versionHeader = (v: TuyaVersion): Buffer => Buffer.concat([Buffer.from(v), Buffer.alloc(12)])
 
-export function packFrame(version: TuyaVersion, key: Buffer, seq: number, cmd: number, plain: Buffer): Buffer {
+export function packFrame(version: TuyaVersion, key: Buffer, seq: number, cmd: number, plain: Buffer, nonce?: Buffer): Buffer {
   if (version === '3.5') {
-    const iv = randomBytes(12)
+    const iv = nonce ?? randomBytes(12)
+    if (iv.length !== 12) throw new Error('Invalid Tuya GCM nonce')
     const header = Buffer.alloc(18)
     header.writeUInt32BE(PREFIX_66, 0)
     header.writeUInt32BE(seq, 6)

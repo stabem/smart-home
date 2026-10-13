@@ -148,6 +148,16 @@ describe('Tuya LAN', () => {
     expect(() => unpackFrame('3.5', Buffer.from('0123456789abcdef'), frame)).toThrow()
   })
 
+  it('packs TinyTuya 3.5 CONTROL_NEW with encrypted version header, sequence and session key', () => {
+    // TinyTuya XenonDevice.generate_payload(CONTROL) overrides to 0x0d;
+    // message_helper.pack_message uses the 6699 header as GCM AAD.
+    // The fixed bytes were calculated independently with Python cryptography AESGCM.
+    const plain = Buffer.concat([Buffer.from('3.5'), Buffer.alloc(12),
+      Buffer.from('{"protocol":5,"t":1,"data":{"dps":{"1":true}}}')])
+    const frame = packFrame('3.5', Buffer.from('0123456789abcdef'), 7, 13, plain, Buffer.alloc(12))
+    expect(frame.toString('hex')).toBe('000066990000000000070000000d0000005900000000000000000000000071cc1f45f98a8cc38f5691b0a5ac38f99c99ccd14744d62183b17e08757cabe93f81d8a1250291be283d1b61ff940868da8d239255c08965d162d9a89fce91ff6d33845b6fcd620ed1e68d15e700009966')
+  })
+
   it('accepts a 3.5 reply return code and uses the TinyTuya nonce-derived session key', async () => {
     const key = Buffer.from('0123456789abcdef')
     const localNonce = Buffer.from('0123456789abcdef')
@@ -165,9 +175,13 @@ describe('Tuya LAN', () => {
         } else if (cmd === 5) {
           expect(unpackFrame('3.5', key, packet).payload).toEqual(finishHmac)
         } else {
-          expect(cmd).toBe(16)
-          expect(unpackFrame('3.5', sessionKey, packet).payload.toString()).toContain('"protocol":5')
-          queueMicrotask(() => this.emit('data', packFrame('3.5', sessionKey, 3, 16,
+          expect([13, 16]).toContain(cmd)
+          const plain = unpackFrame('3.5', sessionKey, packet).payload
+          if (cmd === 13) {
+            expect(plain.subarray(0, 15)).toEqual(Buffer.concat([Buffer.from('3.5'), Buffer.alloc(12)]))
+            expect(JSON.parse(plain.subarray(15).toString())).toMatchObject({ protocol: 5, data: { dps: { '1': true } } })
+          } else expect(plain.toString()).toContain('"protocol":5')
+          queueMicrotask(() => this.emit('data', packFrame('3.5', sessionKey, 3, cmd,
             Buffer.concat([Buffer.alloc(4), Buffer.from('{"data":{"dps":{"1":true}}}')]))))
         }
         return true
@@ -176,6 +190,7 @@ describe('Tuya LAN', () => {
     }
     const client = new TuyaLanClient(() => new FakeSocket() as unknown as Socket, () => localNonce)
     await expect(client.request({ ...device, localKey: key.toString(), version: '3.5' })).resolves.toEqual({ '1': true })
+    await expect(client.request({ ...device, localKey: key.toString(), version: '3.5' }, { '1': true })).resolves.toEqual({ '1': true })
   })
 
   it('returns an offline failure promptly when the socket fails', async () => {
@@ -194,6 +209,17 @@ describe('Tuya LAN', () => {
 })
 
 describe('Smart Life QR flow', () => {
+  it('uses cloud channel names and device-number fallback instead of Canal 1', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: [{ ownerId: 'home', name: 'Casa' }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: [{ id: 'switch', name: 'Interruptor Office', category: 'kg', local_key: 'fixture-key',
+        status: [{ code: 'switch_1', name: 'Luz do Office' }, { code: 'switch_2' }] }] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: {} }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    const homes = await cloud.listHomes(session)
+    expect(homes[0].devices[0].channels).toEqual([{ dp: 1, name: 'Luz do Office' }, { dp: 2, name: 'Interruptor Office 2' }])
+  })
   it('requests QR token and polls without exposing a credential in errors', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ success: true, result: { qrcode: 'qr-token' } }) })
@@ -329,7 +355,7 @@ describe('typed light service', () => {
     expect(lan.request).not.toHaveBeenCalled()
   })
 
-  it('uses Smart Life when a discovered LAN device stops responding', async () => {
+  it('falls back to Smart Life when a 3.5 LAN set fails', async () => {
     const cloud = {
       listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
         { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home' }
@@ -339,12 +365,12 @@ describe('typed light service', () => {
     }
     const lan = { request: vi.fn().mockRejectedValue(new Error('offline')) }
     const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient,
-      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: '192.168.15.9', version: '3.3' }]])),
+      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: '192.168.15.9', version: '3.5' }]])),
       vi.fn().mockResolvedValue([]))
     await service.discover(session)
     expect(await service.setLight('light-1', { on: true })).toEqual({ on: true, online: true, viaCloud: true })
     expect(cloud.sendCommands).toHaveBeenCalledWith(session, 'light-1', [{ code: 'switch_led', value: true }])
-    expect(lan.request).toHaveBeenCalledTimes(3)
+      expect(lan.request).toHaveBeenCalledTimes(1)
   })
 
   it('scrubs a saved WAN IP and persists the corrected setup', async () => {

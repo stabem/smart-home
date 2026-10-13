@@ -89,6 +89,12 @@ describe('ThinQ AC client', () => {
       .toEqual({ airFlow: { windStrengthDetail: 'HIGH' } })
   })
 
+  it.each([['LOW', 'Baixa'], ['LOW_MID', 'Média-baixa'], ['MID', 'Média'], ['MID_HIGH', 'Média-alta'], ['HIGH', 'Alta'], ['AUTO', 'Auto'], ['POWER', 'Turbo']])('labels LG fan %s as %s', async (raw, label) => {
+    const fetcher = mockFetch({ '/devices/ac-1/profile': { property: { airFlow: { windStrengthDetail: { mode: ['r'] } } } },
+      '/devices/ac-1/state': { operation: { airConOperationMode: 'POWER_ON' }, temperature: { targetTemperatureC: 23 }, airFlow: { windStrengthDetail: raw } } })
+    expect((await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')).fan).toBe(label)
+  })
+
   it('keeps an unreachable AC in the list as offline', async () => {
     const fetcher = mockFetch({ '/devices': [
       { deviceId: 'ac-1', deviceInfo: { alias: 'Office', deviceType: 'DEVICE_AIR_CONDITIONER' } }

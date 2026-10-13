@@ -31,7 +31,7 @@ function isDeviceCommand(value: unknown): value is DeviceCommand {
   }
 }
 
-function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[], acRoomIds: Record<string, string> = {}, lightRoomIds: Record<string, string> = {}): Room[] {
+function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name'>[], acRoomIds: Record<string, string> = {}, lightRoomIds: Record<string, string> = {}, lightNames: Record<string, string> = {}, includeEmpty = false): Room[] {
   const rooms = new Map<string, Room>()
   for (const home of homes) for (const device of home.devices) {
     if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
@@ -53,12 +53,12 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
     const lights = device.category === 'dj'
       ? [{ id: device.id, name: device.name, state: { on: false, online: false } }]
       : channels.map(channel => ({ id: channel.dp === 1 ? device.id : `${device.id}::${channel.dp}`,
-        name: name === 'Office' && channel.dp === 2 && /^Canal 2$/.test(channel.name) ? 'Cortineiro' : channel.name,
+        name: /^Canal \d+$/i.test(channel.name) ? `${device.name} ${channel.dp}` : channel.name,
         switchOnly: true, state: { on: false, online: false } }))
     for (const light of lights) {
       const quarto = name === 'Office' && light.id === `${device.id}::2` ? [...rooms.values()].find(room => room.name === 'Quarto') : undefined
       const target = rooms.get(lightRoomIds[light.id]) ?? quarto ?? rooms.get(id)!
-      target.lights.push(light)
+      target.lights.push({ ...light, name: lightNames[light.id] ?? light.name })
     }
   }
   for (const ac of acs) {
@@ -66,7 +66,7 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
     const room = rooms.get(acRoomIds[ac.id]) || [...rooms.values()].find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())!
     room.acs.push({ ...ac, state: offlineAc })
   }
-  return [...rooms.values()].filter(room => room.lights.length || room.acs.length)
+  return [...rooms.values()].filter(room => includeEmpty || room.lights.length || room.acs.length)
 }
 
 export class HomeController {
@@ -124,8 +124,9 @@ export class HomeController {
       this.qrToken = null
     }
     const [homes, acs] = await Promise.all([this.tuya.discover(this.session), this.lg.listAcs()])
-    this.draft = { homes, acs: acs.map(({ id, name }) => ({ id, name })) }
-    return roomList(this.draft.homes, this.draft.acs)
+    this.draft = { ...this.saved, homes, acs: acs.map(({ id, name }) => ({ id, name })),
+      smartLifeSession: this.session ?? undefined, smartLifeUserCode: this.loginUserCode || this.saved?.smartLifeUserCode }
+    return roomList(this.draft.homes, this.draft.acs, this.draft.acRoomIds, this.draft.lightRoomIds, this.draft.lightNames)
   }
 
   async reconnectSmartLife(): Promise<void> {
@@ -170,7 +171,7 @@ export class HomeController {
   async rooms(): Promise<Room[]> {
     if (!this.saved) return []
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds, this.saved.lightNames)
     await Promise.all(rooms.flatMap(room => [
       ...room.lights.map(async light => { light.state = await this.tuya.getState(light.id) }),
       ...room.acs.map(ac => this.acState(ac))
@@ -184,6 +185,22 @@ export class HomeController {
     return this.saved?.lightGroups ?? suggestLightGroups(rooms)
   }
 
+  private async setGroupMember(id: string, patch: Partial<LightState>): Promise<LightState> {
+    let last: unknown
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const state = await this.tuya.setLight(id, patch)
+        if (state.online) return state
+        last = new Error('offline after LAN and cloud control')
+      } catch (error) { last = error }
+      const message = last instanceof Error ? last.message : 'unknown'
+      const secrets = [this.saved?.lgPat, this.saved?.smartLifeSession?.accessToken, this.saved?.smartLifeSession?.refreshToken,
+        ...this.saved?.homes.flatMap(home => home.devices.map(device => device.localKey)) ?? []].filter((value): value is string => !!value)
+      console.warn(`Group member id=${id} attempt=${attempt} failed: ${secrets.reduce((safe, secret) => safe.replaceAll(secret, '[redacted]'), message).replace(/[\r\n]+/g, ' ')}`)
+    }
+    throw last
+  }
+
   private async reapplyDrift(rooms: Room[], groups: LightGroup[]): Promise<void> {
     for (const group of groups) {
       const desired = this.saved?.groupLastState?.[group.id]
@@ -191,7 +208,8 @@ export class HomeController {
       const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
       const patch = Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key))) as Partial<LightState>
       const drifted = members.filter(light => light.state.online && Object.entries(patch).some(([key, value]) => light.state[key as keyof LightState] !== value))
-      const results = await Promise.allSettled(drifted.map(light => this.tuya.setLight(light.id, patch)))
+      const results = []
+      for (const light of drifted) results.push(await Promise.allSettled([this.setGroupMember(light.id, patch)]).then(([result]) => result))
       this.groupFailures[group.id] = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [drifted[index].name] : [])
       results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.online) drifted[index].state = result.value })
     }
@@ -205,13 +223,45 @@ export class HomeController {
 
   groupSetup(): { rooms: Room[]; groups: LightGroup[] } {
     if (!this.saved) throw new Error('Configure devices first')
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
-    return { rooms, groups: this.groups(rooms) }
+    const source = this.draft ?? this.saved
+    const rooms = roomList(source.homes, source.acs, source.acRoomIds, source.lightRoomIds, source.lightNames, true)
+    const ids = new Set(rooms.flatMap(room => room.lights.map(light => light.id)))
+    return { rooms, groups: (source.lightGroups ?? suggestLightGroups(rooms)).filter(group => group.memberIds.every(id => ids.has(id))) }
+  }
+
+  saveHomeEdits(assignments: unknown, names: unknown, groups: unknown): void {
+    if (!this.saved) throw new Error('Configure devices first')
+    if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments) ||
+      !names || typeof names !== 'object' || Array.isArray(names)) throw new Error('Invalid home edits')
+    const source = this.draft ?? this.saved
+    const base = roomList(source.homes, source.acs, {}, {}, {}, true)
+    const roomIds = new Set(base.map(room => room.id))
+    const lightIds = new Set(base.flatMap(room => room.lights.map(light => light.id)))
+    const acIds = new Set(source.acs.map(ac => ac.id))
+    const mapping = assignments as Record<string, unknown>
+    const labels = names as Record<string, unknown>
+    for (const [id, roomId] of Object.entries(mapping)) {
+      if ((!lightIds.has(id) && !acIds.has(id)) || typeof roomId !== 'string' || !roomIds.has(roomId)) throw new Error('Invalid room mapping')
+    }
+    for (const [id, name] of Object.entries(labels)) {
+      if (!lightIds.has(id) || typeof name !== 'string' || !name.trim() || name.trim().length > 80) throw new Error('Invalid light name')
+    }
+    const next: SavedSetup = { ...source,
+      acRoomIds: Object.fromEntries(Object.entries(mapping).filter(([id]) => acIds.has(id))) as Record<string, string>,
+      lightRoomIds: Object.fromEntries(Object.entries(mapping).filter(([id]) => lightIds.has(id))) as Record<string, string>,
+      lightNames: Object.fromEntries(Object.entries(labels).map(([id, name]) => [id, (name as string).trim()])) }
+    const rooms = roomList(next.homes, next.acs, next.acRoomIds, next.lightRoomIds, next.lightNames)
+    next.lightGroups = validateLightGroups(groups, rooms)
+    const groupIds = new Set(next.lightGroups.map(group => group.id))
+    next.groupLastState = Object.fromEntries(Object.entries(next.groupLastState ?? {}).filter(([id]) => groupIds.has(id)))
+    this.store.save(next)
+    this.saved = next
+    this.draft = null
   }
 
   saveLightGroups(value: unknown): void {
     if (!this.saved) throw new Error('Configure devices first')
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds, this.saved.lightNames)
     const groups = validateLightGroups(value, rooms)
     const ids = new Set(groups.map(group => group.id))
     this.saved = { ...this.saved, lightGroups: groups,
@@ -228,7 +278,7 @@ export class HomeController {
     if (!isDeviceCommand(command)) throw new Error('Invalid device command')
     if (!this.saved) throw new Error('Configure devices before sending commands')
     await this.ready
-    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds)
+    const rooms = roomList(this.saved.homes, this.saved.acs, this.saved.acRoomIds, this.saved.lightRoomIds, this.saved.lightNames)
     const light = rooms.flatMap(room => room.lights).find(item => item.id === command.deviceId)
     const ac = rooms.flatMap(room => room.acs).find(item => item.id === command.deviceId)
     if ((command.kind === 'light.power' || command.kind === 'light.brightness' || command.kind === 'light.color' || command.kind === 'light.temperature') && light) {
@@ -245,7 +295,8 @@ export class HomeController {
         : command.kind === 'light.brightness' ? { brightness: command.brightness }
           : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
       const members = rooms.flatMap(room => room.lights).filter(item => group.memberIds.includes(item.id))
-      const results = await Promise.allSettled(members.map(member => this.tuya.setLight(member.id, patch)))
+      const results = []
+      for (const member of members) results.push(await Promise.allSettled([this.setGroupMember(member.id, patch)]).then(([result]) => result))
       const failed = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [members[index].name] : [])
       this.groupFailures[group.id] = failed
       this.saved.groupLastState = { ...this.saved.groupLastState, [group.id]: { ...this.saved.groupLastState?.[group.id], ...patch } }

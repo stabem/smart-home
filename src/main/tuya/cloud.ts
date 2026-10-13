@@ -171,8 +171,9 @@ export class SmartLifeCloud {
           const match = /^switch_(\d+)$/.exec(String(item.code ?? ''))
           if (match) {
             const dp = Number(match[1])
-            const name = typeof item.name === 'string' && item.name.trim() ? item.name.trim() : `Canal ${dp}`
-            if (!channels.has(dp) || channels.get(dp) === `Canal ${dp}`) channels.set(dp, name)
+            const name = typeof item.name === 'string' && item.name.trim() && !/^Canal \d+$/i.test(item.name.trim())
+              ? item.name.trim() : `${result.name} ${dp}`
+            if (!channels.has(dp) || channels.get(dp) === `${result.name} ${dp}`) channels.set(dp, name)
           }
         }
         if (channels.size) result.channels = [...channels].map(([dp, name]) => ({ dp, name })).sort((a, b) => a.dp - b.dp)
