@@ -1,24 +1,10 @@
 {
-  "promise": "The tray fixture feels like a calm macOS widget: one frosted panel, a two-column Control Center room grid, and compact light and AC controls. The four approved journeys keep their names, roles and working behavior.",
+  "promise": "PR #21 BLOCK: AC fan state and control use the preferred writable airFlow property from the profile; Celsius state works with temperatureInUnits.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/renderer/App.tsx",
-    "src/renderer/style.css",
-    "src/renderer/design-proof.mjs",
-    "src/renderer/journey-proof.mjs",
-    "src/renderer/map/ApartmentMap.tsx",
-    "src/renderer/map/floorplan.ts",
-    "src/main/index.ts",
-    "docs/DESIGN.md",
-    "docs/CREDITS.md",
-    "package.json",
-    "package-lock.json"
+    "src/main/lg/client.ts",
+    "src/main/lg/client.test.ts"
   ],
-  "journeys": [
-    "tray-toggle-room-lights",
-    "tray-adjust-light",
-    "tray-control-ac",
-    "tray-first-setup"
-  ],
-  "proof": "node src/renderer/journey-proof.mjs && node src/renderer/design-proof.mjs && sh ci/local-ci.sh"
+  "proof": "npx vitest run src/main/lg/client.test.ts && sh ci/local-ci.sh",
+  "journeys": ["tray-control-ac"]
 }
