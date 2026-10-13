@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HomeController } from './home'
 import type { SavedSetup, SetupStore } from './store'
-import type { SmartLifeCloud, SmartLifeHome, SmartLifeSession, TuyaService } from './tuya'
+import { SmartLifeCloud, TuyaService, type SmartLifeHome, type SmartLifeSession } from './tuya'
+import type { TuyaLanClient } from './tuya'
 import type { LgClient } from './lg/client'
 
 const homes: SmartLifeHome[] = [{ id: 'home-1', name: 'Casa', devices: [
@@ -37,7 +38,7 @@ describe('main process setup and control', () => {
     expect(JSON.stringify(rooms)).not.toContain('fake-key')
     await home.save()
     expect(store.save).toHaveBeenCalledOnce()
-    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true })
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true })
   })
 
   it('routes known device commands and rejects an offline light', async () => {
@@ -167,6 +168,37 @@ describe('main process setup and control', () => {
     }
   })
 
+  it('reconnects a missing or expired Smart Life session without changing saved assignments', async () => {
+    const initial: SavedSetup = { homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }],
+      acRoomIds: { 'ac-1': 'home-1:r2' }, lightRoomIds: { 'light-1': 'home-1:r2' },
+      smartLifeUserCode: 'saved-code', smartLifeSession: { ...session, expiresAt: 0 } }
+    const { home, store, cloud, tuya } = harness(initial)
+    expect(home.status().smartLifeConnected).toBe(false)
+    await home.beginLogin()
+    await expect(home.reconnectSmartLife()).resolves.toBeUndefined()
+    expect(cloud.pollLogin).toHaveBeenCalledWith('fake-qr', 'saved-code')
+    expect(store.save).toHaveBeenCalledWith(expect.objectContaining({
+      homes, acRoomIds: initial.acRoomIds, lightRoomIds: initial.lightRoomIds, smartLifeSession: session
+    }))
+    expect(tuya.restore).toHaveBeenLastCalledWith(homes, session)
+    expect(home.status().smartLifeConnected).toBe(true)
+    expect((await home.rooms()).find(room => room.name === 'Office')?.lights.map(light => light.id)).toContain('light-1')
+  })
+
+  it('persists a sharing token refreshed before expiry in the saved setup', async () => {
+    const due = { ...session, accessToken: 'old-token', refreshToken: 'old-refresh', expiresAt: Date.now() + 4 * 60_000 }
+    const { store, cloud, lg } = harness({ homes: [], acs: [], smartLifeSession: due })
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true,
+      result: { accessToken: 'new-token', refreshToken: 'new-refresh', expireTime: 3600 } }) })
+    const tuya = new TuyaService(new SmartLifeCloud(fetcher as unknown as typeof fetch), {} as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map()))
+    new HomeController(store as unknown as SetupStore, cloud as unknown as SmartLifeCloud, tuya, lg as unknown as LgClient)
+    await vi.waitFor(() => expect(store.save).toHaveBeenCalledWith(expect.objectContaining({
+      smartLifeSession: expect.objectContaining({ accessToken: 'new-token', refreshToken: 'new-refresh' })
+    })))
+    expect(fetcher).toHaveBeenCalledOnce()
+  })
+
   it('starts with saved credentials without environment and reads old files with environment fallback', async () => {
     vi.stubEnv('LG_PAT', '')
     vi.stubEnv('LG_COUNTRY', '')
@@ -183,7 +215,7 @@ describe('main process setup and control', () => {
       lgPat: 'saved-lg-pat', lgCountry: 'US', smartLifeUserCode: 'saved-user-code', smartLifeSession: session }
     const { store, cloud, tuya } = harness(setup)
     const home = new HomeController(store as unknown as SetupStore, cloud as unknown as SmartLifeCloud, tuya as unknown as TuyaService)
-    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true })
+    expect(home.status()).toEqual({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: true, smartLifeUserCodeConfigured: true, smartLifeConnected: true })
     await home.rooms()
     expect(fetcher).toHaveBeenCalledOnce()
     expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({ authorization: 'Bearer saved-lg-pat', 'x-country': 'US' })

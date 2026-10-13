@@ -43,6 +43,7 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [busy, setBusy] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [settings, setSettings] = useState(false)
+  const [reconnecting, setReconnecting] = useState(false)
   const [login, setLogin] = useState(false)
   const [colorFor, setColorFor] = useState<string | null>(null)
   const [acMenu, setAcMenu] = useState<'mode' | 'fan' | null>(null)
@@ -50,9 +51,9 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [userCode, setUserCode] = useState('')
   const [acRoomIds, setAcRoomIds] = useState<Record<string, string>>({})
   const [acError, setAcError] = useState<Record<string, string>>({})
-  async function refresh() { setRooms(await api.getRooms()) }
+  async function refresh() { setRooms(await api.getRooms()); setSetup(await api.getSetupStatus()) }
   useEffect(() => {
-    void api.getRooms().then(setRooms).catch(() => setRooms([]))
+    void api.getRooms().then(async rooms => { setRooms(rooms); setSetup(await api.getSetupStatus()) }).catch(() => setRooms([]))
     void api.getSetupStatus().then(setSetup).catch(() => setError('Não foi possível abrir a configuração salva.'))
     void api.getLaunchAtLogin().then(setLogin).catch(() => setLogin(false))
   }, [api])
@@ -88,6 +89,17 @@ export function App({ api }: { api: SmartHomeApi }) {
     setBusy(true); setError('')
     try { await api.saveSetup(acRoomIds); setSetup(await api.getSetupStatus()); await refresh() }
     catch { setError('Não foi possível salvar a configuração com a proteção do sistema.') }
+    finally { setBusy(false) }
+  }
+  async function finishReconnect() {
+    setBusy(true); setError('')
+    try {
+      await api.reconnectSmartLife()
+      setSetup(await api.getSetupStatus())
+      await refresh()
+      setReconnecting(false)
+      setQr('')
+    } catch { setError('Leia o QR no Smart Life e tente novamente.') }
     finally { setBusy(false) }
   }
   const alert = error && <p role="alert" className="error">{error}</p>
@@ -143,6 +155,15 @@ export function App({ api }: { api: SmartHomeApi }) {
   const lightsOn = rooms.flatMap(item => item.lights).filter(light => light.state.online && light.state.on).length
   return <main className="shell homeScreen">
     <header className="topbar"><div><p className="overline">Minha casa</p><h1>Casa</h1></div><div className="topbarRight"><button className="settingsButton" aria-label="Configurações" aria-expanded={settings} onClick={() => setSettings(!settings)}><Icon src={settingsIcon} /></button></div></header>
+    {!setup.smartLifeConnected && <section className="reconnectBanner" aria-label="Smart Life desconectado">
+      <p><strong>Smart Life desconectado</strong><span>Reconecte para usar as luzes pela nuvem.</span></p>
+      <button type="button" onClick={() => setReconnecting(true)}>Reconectar Smart Life</button>
+    </section>}
+    {reconnecting && <section className="reconnectFlow" aria-label="Reconectar Smart Life">
+      <label>Smart Life User Code<input type="text" aria-label="Smart Life User Code" autoComplete="off" value={userCode} onChange={event => setUserCode(event.target.value)} placeholder={setup.smartLifeUserCodeConfigured ? 'Já configurado' : 'Digite seu User Code'} /></label>
+      <button type="button" className="secondaryButton" disabled={busy} onClick={() => void beginLogin()}>Gerar QR Smart Life</button>
+      {qr && <><img className="qr" src={qr} alt="QR Smart Life" /><p className="help">Escaneie o QR com o app Smart Life.</p><button type="button" className="primaryButton" disabled={busy} onClick={() => void finishReconnect()}>Concluir reconexão</button></>}
+    </section>}
     {settings && <div className="settingsPanel"><label><input type="checkbox" checked={login} onChange={event => { const enabled = event.target.checked; void api.setLaunchAtLogin(enabled).then(() => setLogin(enabled)) }} /> Iniciar com o Windows</label></div>}
     <div className="homeSummary"><div><span className="summaryIcon"><Icon src={homeIcon} /></span><p><strong>{rooms.length} cômodos</strong><span>{lightsOn ? `${lightsOn} ${lightsOn === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Tudo tranquilo por aqui'}</span></p></div><button className="allOff" disabled={!lightsOn} onClick={() => void turnOffAll()}>Apagar tudo</button></div>
     <section className="roomListSection"><div className="sectionHeading"><h2>Cômodos</h2></div><ul aria-label="Cômodos" className="rooms">{rooms.map(item => {

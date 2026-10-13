@@ -54,6 +54,7 @@ export interface SetupStatus {
   lgTokenConfigured: boolean
   tuyaKeysConfigured: boolean
   smartLifeUserCodeConfigured: boolean
+  smartLifeConnected: boolean
 }
 
 export interface SmartHomeApi {
@@ -63,6 +64,7 @@ export interface SmartHomeApi {
   setLaunchAtLogin(enabled: boolean): Promise<void>
   getSetupStatus(): Promise<SetupStatus>
   beginSmartLifeLogin(userCode?: string): Promise<string>
+  reconnectSmartLife(): Promise<void>
   discoverDevices(): Promise<Room[]>
   saveSetup(acRoomIds: Record<string, string>): Promise<void>
 }

@@ -53,6 +53,7 @@ app.whenReady().then(() => {
   ipcMain.handle('device:command', (_event, command) => home.command(command))
   ipcMain.handle('setup:status', () => home.status())
   ipcMain.handle('setup:login', (_event, userCode: unknown) => home.beginLogin(userCode))
+  ipcMain.handle('setup:reconnect', () => home.reconnectSmartLife())
   ipcMain.handle('setup:discover', () => home.discover())
   ipcMain.handle('setup:save', (_event, acRoomIds: unknown) => home.save(acRoomIds))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
