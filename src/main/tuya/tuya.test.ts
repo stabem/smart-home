@@ -59,6 +59,35 @@ describe('Tuya LAN', () => {
     expect(sockets.map(socket => socket.port)).toEqual([6666, 6667, 7000])
   })
 
+  it('solicits a silent 3.5 device on UDP 7000 and accepts its unicast reply', async () => {
+    class FakeUdpSocket extends EventEmitter {
+      port = 0
+      bind(port: number, _host: string, callback: () => void): void { this.port = port; callback() }
+      setBroadcast(): void {}
+      send(packet: Buffer, port: number, target: string, callback: (error: Error | null) => void): void {
+        expect(this.port).toBe(7000)
+        expect(port).toBe(7000)
+        expect(target).toBe('192.168.15.255')
+        expect(unpackFrame('3.5', udpKey, packet)).toEqual({ cmd: 0x25, payload: Buffer.from('{"from":"app","ip":"192.168.15.40"}') })
+        queueMicrotask(() => this.emit('message', packFrame('3.5', udpKey, 2, 0x25,
+          Buffer.from('{"gwId":"light-1","ip":"192.168.15.9","version":"3.5"}')),
+        { address: '192.168.15.9' }))
+        callback(null)
+      }
+      close(): void {}
+    }
+    const sockets: FakeUdpSocket[] = []
+    const interfaces = { wifi: [{ address: '192.168.15.40', family: 'IPv4', internal: false,
+      netmask: '255.255.255.0', mac: '00:00:00:00:00:01', cidr: '192.168.15.40/24' }] } as Parameters<typeof localSubnets>[0]
+    const found = await discoverLan(1, () => {
+      const socket = new FakeUdpSocket()
+      sockets.push(socket)
+      return socket as unknown as UdpSocket
+    }, interfaces)
+    expect(sockets).toHaveLength(3)
+    expect([...found.values()]).toEqual([{ id: 'light-1', ip: '192.168.15.9', version: '3.5' }])
+  })
+
   it('reports a Windows firewall hint when UDP binding is denied', async () => {
     class DeniedSocket extends EventEmitter {
       bind(): void { queueMicrotask(() => this.emit('error', Object.assign(new Error('denied'), { code: 'EACCES' }))) }
@@ -157,6 +186,40 @@ describe('Smart Life QR flow', () => {
 
 describe('typed light service', () => {
   const session = {} as SmartLifeSession
+  it('ends a scan of slow open nonmatching hosts within the total deadline', async () => {
+    vi.useFakeTimers()
+    try {
+      const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
+        { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home' }
+      ] }]) }
+      const request = vi.fn().mockImplementation(() => new Promise((_resolve, reject) => setTimeout(() => reject(new Error('not this device')), 1500)))
+      const candidates = Array.from({ length: 254 }, (_, index) => `192.168.15.${index + 1}`)
+      const service = new TuyaService(cloud as unknown as SmartLifeCloud, { request } as unknown as TuyaLanClient,
+        vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue(candidates))
+      let completed = false
+      const pending = service.discover(session).then(() => { completed = true })
+      await vi.advanceTimersByTimeAsync(8001)
+      expect(completed).toBe(true)
+      expect(request.mock.calls.length).toBeLessThan(20)
+      await pending
+      expect(await service.getState('light-1')).toEqual({ on: false, online: false })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('does not claim a cloud switch changed when status cannot confirm it', async () => {
+    const cloud = {
+      listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
+        { id: 'light-1', name: 'Lamp', category: 'dj', homeId: 'home' }
+      ] }]),
+      sendCommands: vi.fn().mockResolvedValue(undefined),
+      deviceStatus: vi.fn().mockRejectedValue(new Error('status unavailable'))
+    }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, {} as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map()))
+    await service.discover(session)
+    expect(await service.setLight('light-1', { on: true })).toEqual({ on: false, online: false })
+    expect(cloud.sendCommands).toHaveBeenCalledOnce()
+  })
   it('ignores cloud WAN IP and uses a verified TCP probe candidate', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
       { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home', ip: '177.197.79.210' }

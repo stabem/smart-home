@@ -65,17 +65,29 @@ export class TuyaService {
     if (this.refreshing) return
     this.refreshing = true
     try {
-    const addresses = await this.scan().catch(() => new Map<string, { id: string; ip: string; version?: TuyaVersion }>())
+    const deadline = Date.now() + 8000
+    const withinDeadline = async <T>(work: Promise<T>): Promise<T | undefined> => {
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) return undefined
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try { return await Promise.race([work, new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), remaining) })]) }
+      finally { if (timer) clearTimeout(timer) }
+    }
+    const addresses = await withinDeadline(this.scan().catch(() => new Map<string, { id: string; ip: string; version?: TuyaVersion }>()))
+      ?? new Map<string, { id: string; ip: string; version?: TuyaVersion }>()
     const missing = this.homes.flatMap(home => home.devices).filter(device => device.localKey && !isLanIp(addresses.get(device.id)?.ip ?? '') && !isLanIp(device.ip ?? ''))
     if (missing.length) {
-      const candidates = await this.probe().catch(() => [])
+      const candidates = await withinDeadline(this.probe(undefined, undefined, undefined, deadline).catch(() => [])) ?? []
       for (const ip of candidates) {
+        if (Date.now() >= deadline) break
         for (const device of [...missing]) {
+          if (Date.now() >= deadline) break
           const known = versions.includes(device.version as TuyaVersion) ? device.version as TuyaVersion : '3.3'
           for (const version of [known, ...versions.filter(value => value !== known)]) {
+            if (Date.now() >= deadline) break
             try {
-              const dps = await this.lan.request({ id: device.id, ip, localKey: device.localKey, version })
-              if (!Object.values(dps).some(value => typeof value === 'boolean')) continue
+              const dps = await withinDeadline(this.lan.request({ id: device.id, ip, localKey: device.localKey, version }))
+              if (!dps || !Object.values(dps).some(value => typeof value === 'boolean')) continue
               addresses.set(device.id, { id: device.id, ip, version })
               missing.splice(missing.indexOf(device), 1)
               break
@@ -99,7 +111,7 @@ export class TuyaService {
       if (ip && device.localKey) {
         const entry = { id: device.id, ip, localKey: device.localKey, version: versions.includes(version as TuyaVersion) ? version as TuyaVersion : '3.3' as const, category: device.category }
         this.devices.set(device.id, entry)
-        await this.populateChannels(device, entry)
+        if (Date.now() < deadline) await withinDeadline(this.populateChannels(device, entry))
       }
     }
     if (changed) this.addressSink?.(this.homes)
@@ -148,7 +160,7 @@ export class TuyaService {
       const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
       await this.cloud.sendCommands(this.session, selected.id, commands)
       const state = await this.cloudState(selected.id, selected.dp)
-      return state.online ? state : { on: patch.on ?? false, online: true, viaCloud: true }
+      return state
     } catch { return { on: false, online: false } }
   }
 

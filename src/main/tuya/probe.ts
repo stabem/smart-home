@@ -16,13 +16,14 @@ export function localSubnets(interfaces: Interfaces = networkInterfaces()): stri
 export async function probeTcp(
   subnets = localSubnets(),
   socketFactory: (ip: string) => Socket = ip => connect({ host: ip, port: 6668 }),
-  timeoutMs = 200
+  timeoutMs = 200,
+  deadline = Number.POSITIVE_INFINITY
 ): Promise<string[]> {
   const targets = subnets.flatMap(prefix => Array.from({ length: 254 }, (_, index) => `${prefix}.${index + 1}`))
   const found: string[] = []
   let next = 0
   await Promise.all(Array.from({ length: Math.min(24, targets.length) }, async () => {
-    while (next < targets.length) {
+    while (next < targets.length && Date.now() < deadline) {
       const ip = targets[next++]
       const open = await new Promise<boolean>(resolve => {
         let settled = false
@@ -36,7 +37,7 @@ export async function probeTcp(
         }
         socket.once('connect', () => finish(true))
         socket.once('error', () => finish(false))
-        socket.setTimeout(timeoutMs, () => finish(false))
+        socket.setTimeout(Math.min(timeoutMs, Math.max(1, deadline - Date.now())), () => finish(false))
       })
       if (open) found.push(ip)
     }

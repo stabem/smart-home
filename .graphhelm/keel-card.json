@@ -1,17 +1,12 @@
 {
-  "promise": "Issue #22: Tuya lights use discovered or probed LAN addresses, never cloud WAN IPs; when local control is unavailable, Smart Life commands keep supported lights usable and the UI shows via nuvem.",
+  "promise": "Issue #22: solicited Tuya 3.5 devices are discovered on UDP 7000; address resolution finishes within eight seconds even with slow open hosts; cloud light changes are shown as online only after a successful status read.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/tuya/cloud.ts",
     "src/main/tuya/discovery.ts",
     "src/main/tuya/index.ts",
     "src/main/tuya/probe.ts",
-    "src/main/tuya/protocol.ts",
-    "src/main/tuya/tuya.test.ts",
-    "src/main/home.ts",
-    "src/shared/types.ts",
-    "src/renderer/App.tsx"
+    "src/main/tuya/tuya.test.ts"
   ],
-  "proof": "npx vitest run src/main/tuya/tuya.test.ts src/main/home.test.ts src/main/store/index.test.ts && sh ci/local-ci.sh",
+  "proof": "npx vitest run src/main/tuya/tuya.test.ts && sh ci/local-ci.sh",
   "journeys": ["tray-toggle-room-lights", "tray-adjust-light"]
 }
