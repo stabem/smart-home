@@ -22,6 +22,7 @@ export interface SmartLifeDevice {
   roomName?: string
   ip?: string
   version?: string
+  online?: boolean
   channels?: Array<{ dp: number; name: string }>
   cloudCodes?: string[]
   dpMap?: Record<string, number>
@@ -100,6 +101,7 @@ export class SmartLifeCloud {
   private refreshInFlight: Promise<void> | null = null
   private readonly deviceHomes = new Map<string, string>()
   private readonly statusCache = new Map<string, { status: Record<string, unknown>; expiresAt: number }>()
+  private readonly onlineCache = new Map<string, boolean>()
   private readonly statusBatches = new Map<string, Promise<void>>()
   onSessionChanged?: () => void
   constructor(private readonly fetcher: typeof fetch = fetch, private readonly queue = sharedQueue) {}
@@ -108,8 +110,14 @@ export class SmartLifeCloud {
 
   registerHomes(homes: SmartLifeHome[]): void {
     this.deviceHomes.clear()
-    for (const home of homes) for (const device of home.devices) this.deviceHomes.set(device.id, home.id)
+    this.onlineCache.clear()
+    for (const home of homes) for (const device of home.devices) {
+      this.deviceHomes.set(device.id, home.id)
+      if (typeof device.online === 'boolean') this.onlineCache.set(device.id, device.online)
+    }
   }
+
+  deviceOnline(id: string): boolean | undefined { return this.onlineCache.get(id) }
 
   private statusEntries(status: unknown): Record<string, unknown> | undefined {
     if (!Array.isArray(status)) return undefined
@@ -210,6 +218,8 @@ export class SmartLifeCloud {
         if (!Array.isArray(devices)) throw new Error('Invalid Smart Life batched status')
         for (const device of devices) {
           const entry = record(device)
+          if (typeof entry.online === 'boolean') this.onlineCache.set(string(entry.id), entry.online)
+          else this.onlineCache.delete(string(entry.id))
           this.rememberStatus(string(entry.id), entry.status)
         }
       })().finally(() => { this.statusBatches.delete(homeId) })
@@ -222,7 +232,14 @@ export class SmartLifeCloud {
   }
 
   async sendCommands(session: SmartLifeSession, id: string, commands: Array<{ code: string; value: unknown }>): Promise<void> {
-    await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands })
+    try { await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands }) }
+    catch (error) {
+      if (error instanceof Error && /code=2001(?:\s|$)/.test(error.message)) {
+        this.onlineCache.set(id, false)
+        this.statusCache.delete(id)
+      }
+      throw error
+    }
     this.statusCache.delete(id)
   }
 
@@ -236,6 +253,7 @@ export class SmartLifeCloud {
       if (!Array.isArray(devices)) throw new Error('Invalid Smart Life devices')
       for (const value of devices) {
         const entry = record(value)
+        if (typeof entry.online === 'boolean') this.onlineCache.set(string(entry.id), entry.online)
         this.rememberStatus(string(entry.id), entry.status)
       }
       const mapped = await Promise.all(devices.map(async value => {
@@ -246,6 +264,7 @@ export class SmartLifeCloud {
           ip: typeof device.ip === 'string' ? device.ip : undefined,
           version: typeof device.version === 'string' ? device.version : undefined
         }
+        if (typeof device.online === 'boolean') result.online = device.online
         const entries = [device.status, device.functions].flatMap(value => Array.isArray(value) ? value :
           value && typeof value === 'object' ? Object.entries(value).map(([code, detail]) => ({ code, ...(detail && typeof detail === 'object' ? detail : {}) })) : [])
         // Status reports may include read-only codes. Only functions are writable.

@@ -6,6 +6,7 @@ export interface LightState {
   online: boolean
   viaCloud?: boolean
   stale?: boolean
+  reason?: 'sem energia ou fora da rede'
 }
 
 export interface AcState {

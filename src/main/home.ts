@@ -268,8 +268,9 @@ export class HomeController {
       try {
         const state = await this.tuya.setLight(id, patch)
         if (confirms(state, patch)) return state
+        if (state.reason) throw new Error('Sem energia')
         last = new Error('offline after LAN and cloud control')
-      } catch (error) { last = error }
+      } catch (error) { last = error; if (error instanceof Error && error.message === 'Sem energia') throw error }
       const message = last instanceof Error ? last.message : 'unknown'
       const secrets = [this.saved?.lgPat, this.saved?.smartLifeSession?.accessToken, this.saved?.smartLifeSession?.refreshToken,
         ...this.saved?.homes.flatMap(home => home.devices.map(device => device.localKey)) ?? []].filter((value): value is string => !!value)
@@ -364,7 +365,7 @@ export class HomeController {
         : command.kind === 'light.brightness' ? { brightness: command.brightness }
           : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
       const state = await this.tuya.setLight(light.id, patch)
-      if (!state.online) throw new Error('Device offline')
+      if (!state.online) throw new Error(state.reason ? 'Sem energia' : 'Device offline')
       return
     }
     const group = this.groups(rooms).find(item => item.id === command.deviceId)
@@ -380,7 +381,10 @@ export class HomeController {
       this.groupFailures[group.id] = failed
       this.saved.groupLastState = { ...this.saved.groupLastState, [group.id]: { ...this.saved.groupLastState?.[group.id], ...patch } }
       this.store.save(this.saved)
-      if (failed.length) throw new Error(`Falha em: ${failed.join(', ')}`)
+      if (failed.length) {
+        const powerless = results.flatMap((result, index) => result.status === 'rejected' && result.reason instanceof Error && result.reason.message === 'Sem energia' ? [members[index].name] : [])
+        throw new Error(powerless.length ? `Sem energia: ${powerless.join(', ')}` : `Falha em: ${failed.join(', ')}`)
+      }
       return
     }
     if (ac && this.lg && (command.kind === 'ac.power' || command.kind === 'ac.temperature' || command.kind === 'ac.mode' || command.kind === 'ac.fan' || command.kind === 'ac.turbo')) {
