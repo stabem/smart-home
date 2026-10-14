@@ -24,8 +24,14 @@ export function matchingRoom(deviceName: string, availableRooms: readonly string
     ?? (/(^|[^a-z])sala([^a-z]|$)/.test(words) ? 'Sala de estar' : undefined)
 }
 
-export function gangDefault(deviceName: string, dp: number): { name: string; room?: string } | undefined {
+export function gangDefault(deviceName: string, dp: number, category: string): { name?: string; room?: string } | undefined {
+  if (category === 'dj') return normalized(deviceName) === 'corredor' ? { room: 'Entrada' } : undefined
   switch (normalized(deviceName)) {
+    case 'cozinha': return ({
+      1: { name: 'Luz da entrada', room: 'Entrada' },
+      2: { name: 'Cozinha', room: 'Cozinha' },
+      3: { name: 'Lustre da sala de jantar', room: 'Mesa de jantar' }
+    } as Record<number, { name: string; room?: string }>)[dp]
     case 'sala de estar': return ({
       1: { name: 'LED teto' },
       2: { name: 'LED sala de jantar', room: 'Mesa de jantar' },

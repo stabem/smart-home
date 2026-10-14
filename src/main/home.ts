@@ -51,8 +51,8 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
     const id = deviceRoomId(home, name, device.roomId)
     if (!rooms.has(id)) rooms.set(id, { id, name, lights: [], acs: [] })
   }
-  for (const home of homes) for (const device of home.devices) for (const channel of device.channels ?? []) {
-    const name = gangDefault(device.name, channel.dp)?.room
+  for (const home of homes) for (const device of home.devices) for (const channel of device.category === 'dj' ? [{ dp: 1 }] : device.channels ?? []) {
+    const name = gangDefault(device.name, channel.dp, device.category)?.room
     if (name && ![...rooms.values()].some(room => room.id.startsWith(`${home.id}:`) && normalized(room.name) === normalized(name))) {
       rooms.set(`${home.id}:${name}`, { id: `${home.id}:${name}`, name, lights: [], acs: [] })
     }
@@ -75,7 +75,7 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
         switchOnly: true, state: { on: false, online: false } }))
     for (const light of lights) {
       const dp = light.id === device.id ? 1 : Number(light.id.slice(device.id.length + 2))
-      const fallback = device.category === 'dj' ? undefined : gangDefault(device.name, dp)
+      const fallback = gangDefault(device.name, dp, device.category)
       const preferred = fallback?.room ? [...rooms.values()].find(room => room.id.startsWith(`${home.id}:`) && normalized(room.name) === normalized(fallback.room!)) : undefined
       const target = rooms.get(lightRoomIds[light.id]) ?? preferred ?? rooms.get(id)!
       target.lights.push({ ...light, name: lightNames[light.id] || fallback?.name || light.name })
@@ -102,7 +102,7 @@ function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boo
       const id = device.category === 'dj' || channel.dp === 1 ? device.id : `${device.id}::${channel.dp}`
       const location = locations.get(id)
       if (!location) continue
-      const gang = device.category === 'dj' ? undefined : gangDefault(device.name, channel.dp)
+      const gang = gangDefault(device.name, channel.dp, device.category)
       if (gang?.name && !lightNames[id]?.trim()) { lightNames[id] = gang.name; changed = true }
       if ((gang?.room || !device.roomName?.trim() && matchingRoom(device.name,
         [...houseRooms, ...home.devices.flatMap(item => item.roomName?.trim() ? [roomName(item.roomName)] : [])])) && !lightRoomIds[id]?.trim()) {

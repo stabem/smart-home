@@ -1,5 +1,5 @@
 {
-  "promise": "Discovery and existing encrypted setups use editable house room and gang defaults while preserving explicit edits.",
+  "promise": "Discovery and migration place the Cozinha gangs and Corredor in the owner's rooms while preserving saved name and room edits.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
     "src/main/house-defaults.ts",
