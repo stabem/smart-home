@@ -24,6 +24,7 @@ export interface SmartLifeDevice {
   version?: string
   channels?: Array<{ dp: number; name: string }>
   cloudCodes?: string[]
+  dpMap?: Record<string, number>
 }
 export interface SmartLifeHome { id: string; name: string; devices: SmartLifeDevice[] }
 
@@ -265,6 +266,37 @@ export class SmartLifeCloud {
           result.roomId = room.roomId === undefined ? undefined : String(room.roomId)
           result.roomName = typeof room.name === 'string' ? room.name : undefined
         } catch { /* Some devices have no room assignment. */ }
+        if (['dj', 'kg', 'cz'].includes(result.category)) {
+          try {
+            // Same specification endpoint used by tuya-device-sharing-sdk. The code
+            // names alone do not identify the LAN DP on every product.
+            let specification: Record<string, unknown> = {}
+            try { specification = record(await this.request(session, `/v1.1/m/life/${encodeURIComponent(result.id)}/specifications`)) }
+            catch { /* Some sharing accounts expose only the local status strategy. */ }
+            const mapped: Record<string, number> = {}
+            for (const item of [...(Array.isArray(specification.functions) ? specification.functions : []),
+              ...(Array.isArray(specification.status) ? specification.status : [])]) {
+              if (!item || typeof item !== 'object') continue
+              const entry = item as Record<string, unknown>
+              if (typeof entry.code === 'string' && Number.isInteger(entry.dp_id) && Number(entry.dp_id) > 0) {
+                mapped[entry.code] = Number(entry.dp_id)
+              }
+            }
+            if (!Object.keys(mapped).length) {
+              // The sharing SDK also exposes a local status strategy with
+              // dpId/statusCode pairs when specification omits dp_id.
+              const strategy = record(await this.request(session, `/v1.0/m/life/devices/${encodeURIComponent(result.id)}/status`))
+              for (const item of Array.isArray(strategy.dpStatusRelationDTOS) ? strategy.dpStatusRelationDTOS : []) {
+                if (!item || typeof item !== 'object') continue
+                const entry = item as Record<string, unknown>
+                if (entry.supportLocal === false || typeof entry.statusCode !== 'string' ||
+                  !Number.isInteger(entry.dpId) || Number(entry.dpId) <= 0) continue
+                mapped[entry.statusCode] = Number(entry.dpId)
+              }
+            }
+            if (Object.keys(mapped).length) result.dpMap = mapped
+          } catch { /* A missing specification leaves LAN status heuristics available. */ }
+        }
         return result
       }))
       return { id, name: string(home.name), devices: mapped }
