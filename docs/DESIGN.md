@@ -1,40 +1,33 @@
 # Design — Smart Home Control Center
 
-The tray panel follows the compact macOS Sonoma/Sequoia Control Center. References: [Apple Community Sonoma screenshot](https://discussions.apple.com/thread/255659893) and [Control Center screenshot](https://www.imobie.com/screen-mirror/how-to-airplay-on-mac.htm). The useful pattern is one frosted floating sheet, a tight arrangement of separate rounded modules, circular active controls, and wide filled sliders.
+The tray uses the visual language of macOS Control Center: one frosted sheet over wallpaper, compact rounded modules, direct circular controls, and filled pill sliders. References: the [Apple Control Center screenshot](https://support.apple.com/guide/mac-pro/control-center-apdc362a41b2/mac) and an [unannotated macOS Ventura screenshot](https://www.techrepublic.com/article/customize-macos-ventura-control-center/). Copies are in `test-results/design/reference/`; the unannotated screenshot is used in the side-by-side composite.
 
-## Window
+## Window and type
 
-- 420 × 640 frameless Electron window, transparent, with Windows 11 acrylic material. The renderer tints the desktop at roughly 68% opacity and blurs it by 42 px. The glass has a 20 px radius, one 1 px light inner stroke, and an outer shadow. No title bar or scrollbar gutter.
-- When the OS asks for reduced transparency, use an opaque surface with the same readable contrast.
-- Follow the system light or dark mode. Switzer, bundled locally, stands in for SF Pro: 13 px body and module titles, 11 px secondary text, tight tracking, tabular temperatures. Sentence case throughout.
+- The popup is 420 × 640 px. The browser fixture draws a soft wallpaper gradient behind it so the glass can be judged. The real Electron window keeps a transparent body so Windows acrylic remains visible.
+- Dark glass is `rgba(30,30,32,.62)`; light glass is `rgba(245,245,250,.72)`. It has a 0.5 px inner white stroke (18% dark, 12% light), a 24 px radius, and no outer border. Reduced transparency uses an opaque sheet.
+- Use system UI type, with SF Pro where available and Segoe UI on Windows. Text is compact and tabular numbers keep temperatures stable.
+- Modules use a 16 px radius, 8 px gaps, quiet translucent fill, and no decorative borders. Interactive elements have visible keyboard focus.
 
-## Modules
+## Home
 
-- Modules have 15–16 px radii, 8 px gaps, 10–12 px padding, and a quiet fill: about 10% white in dark mode and a pale tint on light glass. No module borders or interior shadows.
-- Active lights use a warm amber circular button. Active AC uses restrained cool blue. Offline and partial failures use a small red message with the device name.
-- Home shows **Casa**, a compact summary with **Apagar tudo**, and all eight rooms in a two-column grid. Room name opens the room; the separate circular light button changes the room. A grouped track counts as one light. Cloud operation is a small glyph with a tooltip.
-- Room view shows **Voltar**, then the room name and one module per light or group. No count-and-AC metadata line. A group shows its name and member count, with one power button, brightness control, and inline color controls.
-- Brightness uses a 30 px filled pill with a sun inside the track and no visible thumb. **Cor** reveals round swatches below the other controls in normal document flow. Expanding it must never overlap the next module.
-- AC uses one module: current and target temperatures, small circular minus/plus buttons, a temperature slider, and compact **Modo**, **Ventilação**, and **Turbo** pills. Keep **Atualizado** or **Offline** visible.
-- Room content scrolls inside the fixed window only when necessary. The scrollbar is transparent until hover and never reserves a Windows gutter.
-- Toggles and expansion use a 180–220 ms ease-out. The room enters with a short 200 ms slide. Reduced motion removes these effects. Idle home schedules no animation frames.
+- The header is **Casa** at 22 px/600 with a gear. There is no overline or summary banner.
+- **Cômodos** has a small **Apagar tudo** text button at its right only when at least one light is on.
+- Eight rooms form two columns of 88 px tiles with 8 px gaps, all visible without scrolling.
+- Each tile has one 36 px circular bulb button at top left, an AC temperature at top right when applicable, then the room name at 15 px/600 and state at 13 px. The room name opens the room. The circle alone controls its lights.
 
-## Interaction
+## Room controls
 
-- Light, room, brightness, color, and AC changes appear in the same render as the press or drag. The command runs in the background. A small dot marks only the affected control while it is pending. Failure restores the last confirmed state and shows a short inline message beside that control.
-- Each device control keeps its own command queue. A brightness or temperature drag waits about 150 ms before sending; further changes replace the unsent value. A refresh lays pending values over device data, so a delayed response cannot erase the user's latest action.
-- React Aria provides switch, toggle, slider, and press behavior. The brightness track follows the pointer without a visible thumb and shows a value bubble during a drag. Keyboard focus stays visible. Controls use a default cursor and a 0.96 pressed scale.
-- Motion animates room push and pop, a subtle shared surface from the room tile to its heading, module expansion, and list layout with short spring motion. The glass sheet stays still while room content moves. Reduced motion removes these effects and the pending pulse. Idle home schedules no animation frames.
-- `?fixture=house&latency=1500&failure=random` exercises slow, occasionally failing commands in a browser. `failure=once` and `failure=always` make rollback repeatable for tests. These flags affect the fixture API only.
+- A simple **Voltar** row precedes a plain 24 px/600 room title. There is no shared surface behind the title.
+- Every light and group has one 36 px circular bulb switch. On is amber `#FFB84D` with a white glyph and a soft 0.5 px inner highlight. Off is 12% white in dark mode or 6% black in light mode, with a 60% glyph. Pressed scale is 0.94. Offline or stale lights disable power, brightness, and color controls.
+- A dimmable light gets a 30 px filled pill slider below the header. The sun sits inside the left end and the percentage inside the right end. A drag can show a small value bubble.
+- Color-capable lights always show five 22 px round swatches and a round **+** button. That button has the accessible name **Cor** and reveals the custom picker and temperature control in normal flow.
+- The AC header is a 36 px snowflake circle, name, and 36 px circular power button. Both circles turn blue `#5AC8FA` when on. The body has **Ambiente 24°** at 13 px, a centered tabular 34 px target with 32 px minus and plus circles, a slider, and three equal-width pills. **Atualizado** or **Offline** stays visible.
 
-## Group behavior and setup
+## Behavior and proof
 
-- Lights in the same room with a shared base and `_N` suffix are suggested as a group. `Office_1` through `Office_4` become **Trilho do Office**. Setup lets the user create a group, edit its name and members, or ungroup it. Membership is saved in the encrypted setup store.
-- A command to a group runs against all members in parallel. Group power is on if any member is on. Brightness and color come from the first online member. A partial failure names each member that failed.
-- The last requested group state is saved. On refresh, the default-on sync guard reapplies it only to members whose live state drifted. Settings has a switch to turn this guard off.
-
-## Setup and proof
-
-**Configurar** keeps the same glass surface, clear connection status, User Code, QR action, discovery, room assignment, group editor, and **Salvar**. Never display secret values.
-
-Use `/?fixture=house` and `/?fixture=empty` on a free local port. The approved `.graphhelm/journeys/` files fix accessible headings, button names, roles, and fixture URLs. Save light and dark 420 × 640 home, Office track, and AC screenshots on a wallpaper-like backdrop in `test-results/design/`. Inspect the captures against the reference for fit, density, glass, modules, sliders, and overlap. Check keyboard focus, reduced motion, contrast, and axe.
+- Device commands remain optimistic: the pressed control updates immediately, a pending dot is local to it, and a failure restores the last confirmed state with an inline message. Brightness and target temperature drags coalesce for about 150 ms.
+- React Aria keeps switch, toggle, slider, and button roles. The approved `.graphhelm/journeys/` names and fixture URLs are unchanged.
+- Motion keeps the short room transition, module layout and custom-control expansion. Reduced motion removes those effects. Idle home schedules no animation frames.
+- Setup retains LG and Tuya status, User Code, QR action, discovery, room assignment, group editing, and save. No secret value appears in the UI.
+- Use the fixture on a free port. Capture light and dark home, Office room, AC on, and setup at 420 × 640. Inspect every capture and the side-by-side composite with the real reference. Block on overlap, duplicate bulb icons, elements outside modules, misaligned baselines, or axe serious/critical findings.
