@@ -45,7 +45,7 @@ describe('main process setup and control', () => {
     expect(tuya.setLight).toHaveBeenCalledTimes(4)
     expect(tuya.setLight).toHaveBeenCalledWith('bulb-4', { brightness: 62 })
   })
-  it('sends track members one at a time and retries one failed member once', async () => {
+  it('starts all track members together with LAN first and retries one failed member once', async () => {
     const { home, tuya } = harness({ homes: trackHomes, acs: [] })
     Object.assign(tuya, { hasLan: (lightId: string) => lightId === 'bulb-3' })
     const id = home.groupSetup().groups[0].id
@@ -62,8 +62,9 @@ describe('main process setup and control', () => {
       return { on: true, online: true }
     })
     await home.command({ kind: 'light.power', deviceId: id, on: true })
-    expect(calls).toEqual(['bulb-3', 'bulb-1', 'bulb-2', 'bulb-2', 'bulb-4'])
-    expect(peak).toBe(1)
+    expect(calls.slice(0, 4)).toEqual(['bulb-3', 'bulb-1', 'bulb-2', 'bulb-4'])
+    expect(calls.at(-1)).toBe('bulb-2')
+    expect(peak).toBe(4)
   })
   it('writes a secret-free inventory next to the encrypted setup', async () => {
     const { home } = harness({ homes: trackHomes, acs: [{ id: 'ac-1', name: 'Ar Office' }], acRoomIds: { 'ac-1': 'office' }, lgPat: 'secret-pat', smartLifeSession: session } as SavedSetup)
@@ -90,9 +91,13 @@ describe('main process setup and control', () => {
   it('names failed track members and reapplies the last desired state after drift', async () => {
     const { home, tuya, store } = harness({ homes: trackHomes, acs: [] })
     const id = (await home.rooms())[0].lights[0].id
-    tuya.setLight.mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'))
+    tuya.setLight.mockImplementation(async (lightId: string, patch: Record<string, unknown>) => {
+      if (lightId === 'bulb-1') throw new Error('offline')
+      return { on: true, online: true, ...patch }
+    })
     await expect(home.command({ kind: 'light.power', deviceId: id, on: true })).rejects.toThrow('Office_1')
     expect(store.save).toHaveBeenCalled()
+    tuya.setLight.mockImplementation(async (_lightId: string, patch: Record<string, unknown>) => ({ on: true, online: true, ...patch }))
     tuya.getState.mockImplementation(async (lightId: string) => ({ on: lightId !== 'bulb-1', online: true }))
     tuya.setLight.mockClear()
     await home.rooms()
