@@ -25,7 +25,7 @@ function scale(value: number, code: string, encode: boolean): number {
     : Math.round((value - min) * 100 / (max - min))
 }
 export function confirms(state: LightState, patch: LightPatch): boolean {
-  return state.online && !state.stale && Object.entries(patch).every(([key, value]) => {
+  return state.online && !state.stale && !state.unconfirmed && Object.entries(patch).every(([key, value]) => {
     if (key === 'brightness' || key === 'temperature') {
       const actual = state[key]
       return typeof actual === 'number' && typeof value === 'number' && Math.abs(actual - value) <= 1

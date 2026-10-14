@@ -288,6 +288,32 @@ describe('Smart Life QR flow', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     expect(String(fetcher.mock.calls[0][0])).toContain('/v1.0/m/life/ha/home/devices')
   })
+  it('never confirms a command from a status batch that started before the command, even for four channels of one device', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const old = [{ id: 'sw', status: [1, 2, 3, 4].map(dp => ({ code: `switch_${dp}`, value: false })) }]
+    const fresh = [{ id: 'sw', status: [1, 2, 3, 4].map(dp => ({ code: `switch_${dp}`, value: true })) }]
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      if (statusCalls === 1) { await gate; return { ok: true, json: async () => ({ success: true, result: old }) } }
+      return { ok: true, json: async () => ({ success: true, result: fresh }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    const early = cloud.deviceStatus(session, 'sw')            // batch starts BEFORE the commands and is held open
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await Promise.all([1, 2, 3, 4].map(dp => cloud.sendCommands(session, 'sw', [{ code: `switch_${dp}`, value: true }])))
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const confirmations = [1, 2, 3, 4].map(() => cloud.deviceStatus(session, 'sw'))
+    release()                                                    // the old batch resolves AFTER the commands, with OLD data
+    expect(await early).toMatchObject({ switch_1: false })
+    const results = await Promise.all(confirmations)
+    results.forEach(status => expect(status).toMatchObject({ switch_1: true, switch_2: true, switch_3: true, switch_4: true }))
+    expect(statusCalls).toBeGreaterThanOrEqual(2)
+  })
   it('takes online from ha/home/devices even when cached switch status says on', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
       { id: 'one', online: false, status: [{ code: 'switch_led', value: true }] }

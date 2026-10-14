@@ -164,9 +164,10 @@ export class SmartLifeCloud {
     return Object.fromEntries(status.map(value => { const item = record(value); return [string(item.code), item.value] }))
   }
 
-  private rememberStatus(id: string, status: unknown): void {
+  /** `fetchedAt` is the START of the batch that produced the entry: data cannot be newer than the request that fetched it. */
+  private rememberStatus(id: string, status: unknown, fetchedAt = Date.now()): void {
     const values = this.statusEntries(status)
-    if (values) this.statusCache.set(id, { status: values, expiresAt: Date.now() + 10_000, fetchedAt: Date.now() })
+    if (values) this.statusCache.set(id, { status: values, expiresAt: Date.now() + 10_000, fetchedAt })
   }
 
   private async publicRequest(path: string, method: 'GET' | 'POST'): Promise<Record<string, unknown>> {
@@ -248,15 +249,17 @@ export class SmartLifeCloud {
   async deviceStatus(session: SmartLifeSession, id: string): Promise<Record<string, unknown>> {
     const cached = this.statusCache.get(id)
     const sentAt = this.commandAt.get(id) ?? 0
-    if (cached && cached.expiresAt > Date.now() && cached.fetchedAt >= sentAt) return cached.status
+    // Only status fetched by a request that STARTED strictly after this device's last command can confirm it.
+    if (cached && cached.expiresAt > Date.now() && cached.fetchedAt > sentAt) return cached.status
     if (this.queue.coolingDown()) throw new SmartLifeRateLimitError('Smart Life rate limited code=-9999999')
     const homeId = this.deviceHomes.get(id)
     if (!homeId) throw new Error('Smart Life home for device missing')
     let batch = this.statusBatches.get(homeId)
-    // A batch that started before this device's last command cannot confirm it: wait for it, then fetch again.
-    if (batch && (this.batchStartedAt.get(homeId) ?? 0) < sentAt) { await batch.catch(() => undefined); batch = this.statusBatches.get(homeId) }
+    // A batch that started before (or at) the command cannot confirm it: let it finish, then start a fresh one.
+    while (batch && (this.batchStartedAt.get(homeId) ?? 0) <= sentAt) { await batch.catch(() => undefined); batch = this.statusBatches.get(homeId) }
     if (!batch) {
-      this.batchStartedAt.set(homeId, Date.now())
+      const startedAt = Date.now()
+      this.batchStartedAt.set(homeId, startedAt)
       batch = (async () => {
         const devices = await this.request(session, '/v1.0/m/life/ha/home/devices', { homeId })
         if (!Array.isArray(devices)) throw new Error('Invalid Smart Life batched status')
@@ -264,7 +267,7 @@ export class SmartLifeCloud {
           const entry = record(device)
           if (typeof entry.online === 'boolean') this.onlineCache.set(string(entry.id), entry.online)
           else this.onlineCache.delete(string(entry.id))
-          this.rememberStatus(string(entry.id), entry.status)
+          this.rememberStatus(string(entry.id), entry.status, startedAt)
         }
       })().finally(() => { this.statusBatches.delete(homeId) })
       this.statusBatches.set(homeId, batch)
