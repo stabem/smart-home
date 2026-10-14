@@ -25,7 +25,20 @@ function scale(value: number, code: string, encode: boolean): number {
     : Math.round((value - min) * 100 / (max - min))
 }
 function confirms(state: LightState, patch: LightPatch): boolean {
-  return state.online && !state.stale && Object.entries(patch).every(([key, value]) => state[key as keyof LightState] === value)
+  return state.online && !state.stale && Object.entries(patch).every(([key, value]) => {
+    if (key === 'brightness' || key === 'temperature') {
+      const actual = state[key]
+      return typeof actual === 'number' && typeof value === 'number' && Math.abs(actual - value) <= 1
+    }
+    if (key === 'color' && typeof value === 'string') {
+      const actual = state.color
+      if (actual?.toLowerCase() === value.toLowerCase()) return true
+      const canonical = decodeHsv(encodeHsv(value))
+      if (!canonical || !actual || !/^#[0-9a-f]{6}$/i.test(actual)) return false
+      return [1, 3, 5].every(i => Math.abs(parseInt(actual.slice(i, i + 2), 16) - parseInt(canonical.slice(i, i + 2), 16)) <= 1)
+    }
+    return state[key as keyof LightState] === value
+  })
 }
 function channel(id: string): { id: string; dp: number } {
   const match = /^(.*)::(\d+)$/.exec(id)

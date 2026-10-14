@@ -1,5 +1,5 @@
 {
-  "promise": "Tuya bulbs use each device's code-to-DP mapping for LAN read and write, with correct v2 and legacy values; an unconfirmed group member cannot turn healthy members off, and failed LAN control tries queued cloud control before failure.",
+  "promise": "Tuya bulbs use each device's code-to-DP mapping for LAN read and write; quantized HSV color and brightness or temperature rounding within one UI step confirm control without duplicate cloud commands, while an unconfirmed group member cannot turn healthy members off.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
     "src/main/tuya/cloud.ts",

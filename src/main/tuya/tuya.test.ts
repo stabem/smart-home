@@ -499,6 +499,19 @@ describe('typed light service', () => {
       .toMatchObject({ on: true, online: true, brightness: 50, temperature: 50, color: '#ff0000' })
     expect(lan.request.mock.calls[0][1]).toEqual({ '20': true, '21': 'colour', '22': 505, '23': 500, '24': '000003e803e8' })
   })
+  it('confirms quantized v2 color and one-step brightness and temperature rounding', async () => {
+    const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home',
+      dpMap: { switch_led: 20, bright_value_v2: 22, temp_value_v2: 23, colour_data_v2: 24 } }] }]),
+      sendCommands: vi.fn().mockResolvedValue(undefined) }
+    const lan = { request: vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ '20': true, '22': 505, '23': 504, '24': '00ef03e80161' }) }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: device.ip, version: '3.5' }]])))
+    await service.discover(session)
+    expect(await service.setLight('light-1', { on: true, brightness: 51, temperature: 51, color: '#00015a' }))
+      .toEqual({ on: true, online: true, brightness: 50, temperature: 50, color: '#00025a' })
+    expect(lan.request.mock.calls[0][1]).toEqual({ '20': true, '21': 'colour', '22': 515, '23': 510, '24': '00ef03e80161' })
+    expect(cloud.sendCommands).not.toHaveBeenCalled()
+  })
   it('uses legacy RGB8 color and 0 to 255 temperature', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home',
       dpMap: { switch_led: 1, work_mode: 2, temp_value: 4, colour_data: 5 } }] }]) }
