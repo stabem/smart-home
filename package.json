@@ -18,8 +18,10 @@
   "dependencies": {
     "@lottiefiles/dotlottie-web": "^0.81.0",
     "dotenv": "^16.6.1",
+    "motion": "^14.2.0",
     "qrcode": "^1.5.4",
     "react": "^19.1.1",
+    "react-aria-components": "^1.22.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {

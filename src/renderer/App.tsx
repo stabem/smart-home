@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { AnimatePresence, LayoutGroup, motion, useIsPresent, useReducedMotion } from 'motion/react'
+import { Button, Slider, SliderThumb, SliderTrack, Switch, ToggleButton } from 'react-aria-components'
+import type { CSSProperties, ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { DotLottie } from '@lottiefiles/dotlottie-web'
 import type { DeviceCommand, LightGroup, Room, SetupStatus, SmartHomeApi } from '../shared/types'
@@ -26,6 +28,16 @@ function Icon({ src, className = '' }: { src: string; className?: string }) {
   return <img className={`lineIcon ${className}`} src={src} alt="" aria-hidden="true" />
 }
 
+function PresenceScreen({ children, className, direction, reducedMotion }: { children: ReactNode; className: string; direction: number; reducedMotion: boolean | null }) {
+  const present = useIsPresent()
+  const surface = useRef<HTMLElement>(null)
+  return <motion.main ref={surface} className={className} inert={!present} aria-hidden={!present} style={{ willChange: reducedMotion ? 'auto' : 'transform' }}
+    initial={reducedMotion ? false : { x: direction, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={reducedMotion ? undefined : { x: -direction, opacity: 0, transition: { duration: .08 } }}
+    onAnimationStart={() => { if (surface.current) surface.current.style.willChange = 'transform' }}
+    onAnimationComplete={() => { if (surface.current) surface.current.style.willChange = 'auto' }}
+    transition={{ duration: reducedMotion ? 0 : .2, ease: [0.18, 0.82, 0.28, 1] }}>{children}</motion.main>
+}
+
 export function updatedLabel(value?: string, now = Date.now()): string {
   if (!value) return 'Atualizado'
   const time = Date.parse(value)
@@ -43,7 +55,40 @@ function GroupEditor({ rooms, groups, onChange }: { rooms: Room[]; groups: Light
   </div>
 }
 
+function applyCommand(rooms: Room[], command: DeviceCommand): Room[] {
+  return rooms.map(room => ({ ...room,
+    lights: room.lights.map(light => {
+      if (light.id !== command.deviceId && !light.memberIds?.includes(command.deviceId)) return light
+      const state = { ...light.state }
+      if (command.kind === 'light.power') state.on = command.on
+      if (command.kind === 'light.brightness') state.brightness = command.brightness
+      if (command.kind === 'light.color') state.color = command.color
+      if (command.kind === 'light.temperature') state.temperature = command.temperature
+      return { ...light, state }
+    }),
+    acs: room.acs.map(ac => {
+      if (ac.id !== command.deviceId) return ac
+      const state = { ...ac.state }
+      if (command.kind === 'ac.power') state.on = command.on
+      if (command.kind === 'ac.temperature') state.targetTemperature = command.temperature
+      if (command.kind === 'ac.mode') { state.mode = command.mode; state.turbo = false }
+      if (command.kind === 'ac.fan') state.fan = command.fan
+      if (command.kind === 'ac.turbo') state.turbo = command.on
+      return { ...ac, state }
+    })
+  }))
+}
+
 export function App({ api }: { api: SmartHomeApi }) {
+  const reducedMotion = useReducedMotion()
+  const baseRooms = useRef<Room[]>([])
+  const optimistic = useRef(new Map<string, { command: DeviceCommand; version: number }>())
+  const sending = useRef(new Set<string>())
+  const serial = useRef(0)
+  const lastIntent = useRef<string | null>(null)
+  const [pending, setPending] = useState<string[]>([])
+  const [controlError, setControlError] = useState<Record<string, string>>({})
+  const [dragging, setDragging] = useState<string | null>(null)
   const [rooms, setRooms] = useState<Room[] | null>(null)
   const [setup, setSetup] = useState<SetupStatus | null>(null)
   const [found, setFound] = useState<Room[] | null>(null)
@@ -62,30 +107,52 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [error, setError] = useState('')
   const [userCode, setUserCode] = useState('')
   const [acRoomIds, setAcRoomIds] = useState<Record<string, string>>({})
-  const [acError, setAcError] = useState<Record<string, string>>({})
-  async function refresh() { setRooms(await api.getRooms()); setSetup(await api.getSetupStatus()) }
+  const visibleRooms = () => [...optimistic.current.values()].reduce((value, item) => applyCommand(value, item.command), baseRooms.current)
+  async function refresh() { baseRooms.current = await api.getRooms(); setRooms(visibleRooms()); setSetup(await api.getSetupStatus()) }
   useEffect(() => {
-    void api.getRooms().then(async rooms => { setRooms(rooms); setSetup(await api.getSetupStatus()) }).catch(() => setRooms([]))
+    void api.getRooms().then(async rooms => { baseRooms.current = rooms; setRooms(rooms); setSetup(await api.getSetupStatus()) }).catch(() => setRooms([]))
     void api.getSetupStatus().then(setSetup).catch(() => setError('Não foi possível abrir a configuração salva.'))
     void api.getLaunchAtLogin().then(setLogin).catch(() => setLogin(false))
   }, [api])
-  async function command(value: DeviceCommand) {
-    try { setError(''); await api.sendCommand(value); setAcError(current => ({ ...current, [value.deviceId]: '' })); await refresh() }
-    catch (cause) {
-      if (value.kind.startsWith('ac.')) setAcError(current => ({ ...current, [value.deviceId]: 'Ar não respondeu. Tente novamente.' }))
-      else setError(cause instanceof Error && cause.message.startsWith('Falha em:') ? cause.message : 'O dispositivo não respondeu. Confira se está ligado e tente novamente.')
-    }
+  function command(value: DeviceCommand) {
+    const key = `${value.deviceId}:${value.kind}`
+    const version = ++serial.current
+    performance.mark(`control:${key}:${version}:intent`)
+    lastIntent.current = `control:${key}:${version}`
+    optimistic.current.set(key, { command: value, version })
+    setRooms(visibleRooms())
+    setPending([...optimistic.current.keys()])
+    setControlError(current => ({ ...current, [value.deviceId]: '' }))
+    if (sending.current.has(key)) return
+    sending.current.add(key)
+    void (async () => {
+      while (optimistic.current.has(key)) {
+        let next = optimistic.current.get(key)!
+        if (next.command.kind === 'light.brightness' || next.command.kind === 'ac.temperature' || next.command.kind === 'light.temperature') {
+          await new Promise(resolve => setTimeout(resolve, 150))
+          next = optimistic.current.get(key)!
+        }
+        try {
+          await api.sendCommand(next.command)
+          baseRooms.current = applyCommand(baseRooms.current, next.command)
+          if (optimistic.current.get(key)?.version === next.version) optimistic.current.delete(key)
+        } catch (cause) {
+          if (optimistic.current.get(key)?.version === next.version) {
+            optimistic.current.delete(key)
+            setControlError(current => ({ ...current, [value.deviceId]: cause instanceof Error && cause.message.startsWith('Falha em:') ? cause.message : value.kind.startsWith('ac.') ? 'Ar não respondeu. Tente novamente.' : 'Dispositivo não respondeu. Tente novamente.' }))
+          }
+        }
+        setRooms(visibleRooms())
+        setPending([...optimistic.current.keys()])
+      }
+      sending.current.delete(key)
+      void refresh().catch(() => undefined)
+    })()
   }
-  async function turnOffAll() {
-    const lights = (rooms ?? []).flatMap(room => room.lights).filter(light => light.state.online && !light.state.stale && light.state.on)
-    try {
-      setError('')
-      await Promise.all(lights.map(light => api.sendCommand({ kind: 'light.power', deviceId: light.id, on: false })))
-    } catch {
-      setError('Uma ou mais luzes não responderam. Confira os dispositivos e tente novamente.')
-    } finally {
-      await refresh()
-    }
+  useLayoutEffect(() => { if (lastIntent.current) { performance.mark(`${lastIntent.current}:paint-ready`); lastIntent.current = null } }, [rooms])
+  const isPending = (deviceId: string) => pending.some(key => key.startsWith(`${deviceId}:`))
+  function turnOffAll() {
+    (rooms ?? []).flatMap(room => room.lights).filter(light => light.state.online && !light.state.stale && light.state.on).forEach(light => command({ kind: 'light.power', deviceId: light.id, on: false }))
   }
   async function beginLogin() {
     try { setError(''); setQr(await QRCode.toDataURL(await api.beginSmartLifeLogin(userCode), { width: 192, margin: 2 })) }
@@ -203,36 +270,36 @@ export function App({ api }: { api: SmartHomeApi }) {
     </div>
   </main>
   const room = rooms.find(item => item.id === selected)
-  if (room) return <main className="shell roomScreen">
+  const lightsOn = rooms.flatMap(item => item.lights).filter(light => light.state.online && light.state.on).length
+  return <LayoutGroup><div className="viewStage"><AnimatePresence initial={false} mode="wait">{room ? <PresenceScreen key={room.id} className="shell roomScreen" direction={20} reducedMotion={reducedMotion}>
     <header className="topbar roomTopbar"><button className="back" onClick={() => { setSelected(null); setColorFor(null) }}><Icon src={backIcon} /> <span>Voltar</span></button><Icon src={homeIcon} className="topbarMark" /></header>
-    <div className="roomTitle"><h1>{room.name}</h1></div>
+    <div className="roomTitle"><motion.span className="sharedRoomSurface" layoutId={reducedMotion ? undefined : `room-surface-${room.id}`} aria-hidden="true" /><h1>{room.name}</h1></div>
     <div className="roomControls">
-      {room.lights.map(light => <section className="devicePanel" key={light.id}>
-        <div className="deviceHead"><button className="lightSwitch" role="switch" aria-label={light.name} aria-checked={light.state.online && light.state.on} disabled={!light.state.online || light.state.stale} onClick={() => void command({ kind: 'light.power', deviceId: light.id, on: !light.state.on })}><Icon src={bulbIcon} className="lampSymbol" /></button><div className="deviceText"><strong>{light.name}</strong><small>{light.state.stale ? 'Sem atualização' : !light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} {light.state.viaCloud && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small></div></div>
+      {room.lights.map(light => <motion.section layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className="devicePanel" key={light.id}>
+        <div className="deviceHead"><Switch className="lightSwitch" aria-label={light.name} isSelected={light.state.online && light.state.on} isDisabled={!light.state.online || light.state.stale} onChange={on => command({ kind: 'light.power', deviceId: light.id, on })}><motion.img className="lineIcon lampSymbol" src={bulbIcon} alt="" aria-hidden="true" animate={{ scale: reducedMotion ? 1 : light.state.on ? 1.12 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} /></Switch><div className="deviceText"><strong>{light.name}</strong><small>{light.state.stale ? 'Sem atualização' : !light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} {light.state.viaCloud && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small></div>{isPending(light.id) && <span className="controlPending" role="status" aria-label="Enviando comando" />}</div>
+        {controlError[light.id] && <p className="controlError" role="alert">{controlError[light.id]}</p>}
         {!!light.partialFailure?.length && <p className="groupError" role="alert">Falha em: {light.partialFailure.join(', ')}</p>}
-        {!light.switchOnly && <label className="rangeLabel"><span className="srOnly">Brilho</span><span className="sliderWrap"><span className="sliderIcon" aria-hidden="true">☼</span><input type="range" aria-label="Brilho" min="1" max="100" disabled={!light.state.online || light.state.stale} value={light.state.brightness ?? 100} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties} onChange={event => void command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(event.target.value) })} /></span><span>{light.state.brightness ?? 100}%</span></label>}
+        {!light.switchOnly && <div className="rangeLabel"><Slider className="brightnessSlider" aria-label="Brilho" minValue={1} maxValue={100} value={light.state.brightness ?? 100} isDisabled={!light.state.online || light.state.stale} onChangeEnd={() => setDragging(null)} onChange={brightness => command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(brightness) })}><SliderTrack className="sliderTrack" onPointerDown={() => setDragging(light.id)} onPointerUp={() => setDragging(null)} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties}><span className="sliderIcon" aria-hidden="true">&#9788;</span><SliderThumb className="ghostThumb" />{dragging === light.id && <span className="valueBubble">{light.state.brightness ?? 100}%</span>}</SliderTrack></Slider><span>{light.state.brightness ?? 100}%</span></div>}
         {!light.switchOnly && <button className="textButton" disabled={!light.state.online || light.state.stale} aria-expanded={colorFor === light.id} onClick={() => setColorFor(colorFor === light.id ? null : light.id)}>Cor <span aria-hidden="true">⌄</span></button>}
-        {colorFor === light.id && <div className="appearance">
+        <AnimatePresence initial={false}>{colorFor === light.id && <motion.div className="appearance" initial={reducedMotion ? false : { height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={reducedMotion ? undefined : { height: 0, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : .2 }}>
           {light.state.color !== undefined && <><div className="swatches" aria-label="Cores rápidas">{[['Âmbar', '#ffbd75'], ['Quente', '#ffe0ae'], ['Neutra', '#ffffff'], ['Fria', '#d8e9ff'], ['Azul', '#88b8e6']].map(([name, color]) => <button key={color} type="button" aria-label={`Cor ${name}`} aria-pressed={light.state.color === color} style={{ backgroundColor: color }} onClick={() => void command({ kind: 'light.color', deviceId: light.id, color })} />)}</div><label>Cor personalizada<input type="color" aria-label="Escolher cor" value={light.state.color} onChange={event => void command({ kind: 'light.color', deviceId: light.id, color: event.target.value })} /></label><span role="status" aria-label="Cor atual">{light.state.color}</span></>}
           {light.state.temperature !== undefined && <label>Temperatura da luz<input type="range" aria-label="Temperatura da luz" min="0" max="100" value={light.state.temperature} onChange={event => void command({ kind: 'light.temperature', deviceId: light.id, temperature: Number(event.target.value) })} /></label>}
           {light.state.color === undefined && light.state.temperature === undefined && <p className="help" role="status">Controle de cor ainda não disponível para este dispositivo.</p>}
-        </div>}
-      </section>)}
-      {room.acs.map(ac => <section className="acPanel" key={ac.id}>
+        </motion.div>}</AnimatePresence>
+      </motion.section>)}
+      {room.acs.map(ac => <motion.section layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className="acPanel" key={ac.id}>
         <div className="deviceHead"><div><span className="deviceIcon acIcon" aria-hidden="true"><Icon src={airIcon} /></span><strong>{ac.name}</strong></div><button className="acPower" aria-label={ac.state.on ? 'Desligar ar' : 'Ligar ar'} disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.power', deviceId: ac.id, on: !ac.state.on })}>{ac.state.on ? 'Desligar ar' : 'Ligar ar'}</button></div>
-        <Motion src={airMotion} active={ac.state.on} className="airMotion" />
-        <div className="acReading"><div><span>Ambiente</span><strong>{ac.state.currentTemperature ?? '—'}°</strong></div><div className="target"><span>Temperatura</span><div className="temperature"><button aria-label="Diminuir" disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.max(16, ac.state.targetTemperature - 1) })}>−</button><strong>{ac.state.targetTemperature}°</strong><button aria-label="Aumentar" disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.min(30, ac.state.targetTemperature + 1) })}>+</button></div></div></div>
-        <input type="range" aria-label="Temperatura" min="16" max="30" disabled={!ac.state.online} value={ac.state.targetTemperature} style={{ '--fill': `${((ac.state.targetTemperature - 16) / 14) * 100}%` } as CSSProperties} onChange={event => void command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Number(event.target.value) })} />
-        <div className="acActions"><button aria-label="Modo" disabled={!ac.state.online} aria-expanded={acMenu === 'mode'} onClick={() => setAcMenu(acMenu === 'mode' ? null : 'mode')}>Modo <small>{ac.state.mode ?? '—'}</small></button><button aria-label="Ventilação" disabled={!ac.state.online} aria-expanded={acMenu === 'fan'} onClick={() => setAcMenu(acMenu === 'fan' ? null : 'fan')}>Ventilação <small>{ac.state.fan ?? '—'}</small></button><button role="switch" aria-label="Turbo" aria-checked={ac.state.turbo ?? false} disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.turbo', deviceId: ac.id, on: !ac.state.turbo })}>Turbo</button></div>
+        <Motion src={airMotion} active={ac.state.on} className="airMotion" />{isPending(ac.id) && <span className="controlPending" role="status" aria-label="Enviando comando" />}
+        <div className="acReading"><div><span>Ambiente</span><strong>{ac.state.currentTemperature ?? '—'}°</strong></div><div className="target"><span>Temperatura</span><div className="temperature"><Button aria-label="Diminuir" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.max(16, ac.state.targetTemperature - 1) })}>−</Button><strong>{ac.state.targetTemperature}°</strong><Button aria-label="Aumentar" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.min(30, ac.state.targetTemperature + 1) })}>+</Button></div></div></div>
+        <Slider className="acSlider" aria-label="Temperatura" minValue={16} maxValue={30} value={ac.state.targetTemperature} isDisabled={!ac.state.online} onChange={temperature => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Number(temperature) })}><SliderTrack className="sliderTrack" style={{ '--fill': `${((ac.state.targetTemperature - 16) / 14) * 100}%` } as CSSProperties}><SliderThumb className="ghostThumb" /></SliderTrack></Slider>
+        <div className="acActions"><button aria-label="Modo" disabled={!ac.state.online} aria-expanded={acMenu === 'mode'} onClick={() => setAcMenu(acMenu === 'mode' ? null : 'mode')}>Modo <small>{ac.state.mode ?? '—'}</small></button><button aria-label="Ventilação" disabled={!ac.state.online} aria-expanded={acMenu === 'fan'} onClick={() => setAcMenu(acMenu === 'fan' ? null : 'fan')}>Ventilação <small>{ac.state.fan ?? '—'}</small></button><Switch aria-label="Turbo" isSelected={ac.state.turbo ?? false} isDisabled={!ac.state.online} onChange={on => command({ kind: 'ac.turbo', deviceId: ac.id, on })}>Turbo</Switch></div>
         {acMenu === 'mode' && <div className="acOptions" aria-label="Escolher modo">{(['Resfriar', 'Seco', 'Ventilar', 'Auto'] as const).map(mode => <button key={mode} aria-pressed={ac.state.mode === mode} onClick={() => { setAcMenu(null); void command({ kind: 'ac.mode', deviceId: ac.id, mode }) }}>{mode}</button>)}</div>}
         {acMenu === 'fan' && <div className="acOptions" aria-label="Escolher ventilação">{(['Auto', 'Baixa', 'Média', 'Alta'] as const).map(fan => <button key={fan} aria-pressed={ac.state.fan === fan} onClick={() => { setAcMenu(null); void command({ kind: 'ac.fan', deviceId: ac.id, fan }) }}>{fan}</button>)}</div>}
-        {acError[ac.id] && <p className="acError" role="alert">{acError[ac.id]}</p>}
+        {controlError[ac.id] && <p className="acError" role="alert">{controlError[ac.id]}</p>}
         <p className="updated" role="status">{ac.state.online ? updatedLabel(ac.state.updatedAt) : 'Offline'}</p>
-      </section>)}
+      </motion.section>)}
     </div>{alert}
-  </main>
-  const lightsOn = rooms.flatMap(item => item.lights).filter(light => light.state.online && light.state.on).length
-  return <main className="shell homeScreen">
+  </PresenceScreen> : <PresenceScreen key="home" className="shell homeScreen" direction={-16} reducedMotion={reducedMotion}>
     <header className="topbar"><div><p className="overline">Minha casa</p><h1>Casa</h1></div><div className="topbarRight"><button className="settingsButton" aria-label="Configurações" onClick={() => void openEdit()}><Icon src={settingsIcon} /></button></div></header>
     {!setup.smartLifeConnected && <section className="reconnectBanner" aria-label="Smart Life desconectado">
       <p><strong>Smart Life desconectado</strong><span>Reconecte para usar as luzes pela nuvem.</span></p>
@@ -250,11 +317,14 @@ export function App({ api }: { api: SmartHomeApi }) {
       const on = item.lights.length > 0 && online && item.lights.every(light => light.state.on)
       const ac = item.acs[0]
       const lit = item.lights.filter(light => light.state.on).length
-      return <li className={`roomTile ${lit ? 'isLit' : ''} ${ac?.state.on ? 'isCool' : ''}`} key={item.id}>
+      return <motion.li layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className={`roomTile ${lit ? 'isLit' : ''} ${ac?.state.on ? 'isCool' : ''}`} key={item.id}>
+        <motion.span className="sharedRoomSurface" layoutId={reducedMotion ? undefined : `room-surface-${item.id}`} aria-hidden="true" />
         <button className="roomName" aria-label={`Abrir ${item.name}`} onClick={() => setSelected(item.id)}><span className="tileIcon"><Icon src={ac ? airIcon : bulbIcon} /></span><span className="tileName">{item.name}</span><small>{stale ? 'Sem atualização' : !online ? 'Offline' : ac?.state.on ? `Ar ${ac.state.targetTemperature}°` : lit ? `${lit} ${lit === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Luzes apagadas'}{online && item.lights.some(light => light.state.viaCloud) && <span className="cloudGlyph" title="Via nuvem" aria-label="Via nuvem">☁</span>}</small>{ac && <strong className="tileTemperature">{ac.state.currentTemperature ?? ac.state.targetTemperature}°</strong>}</button>
-        <button className="roomLights lightSwitch" aria-label={`Luzes ${item.name}`} aria-pressed={on} disabled={!item.lights.length || !online} title={on ? 'Desligar luzes' : 'Ligar luzes'} onClick={() => void Promise.all(item.lights.map(light => api.sendCommand({ kind: 'light.power', deviceId: light.id, on: !on }))).catch(() => setError(`Luzes de ${item.name} não responderam. Confira se estão ligadas na tomada.`)).finally(refresh)}><Icon src={bulbIcon} className="lampSymbol" /><span className="switchTrack" aria-hidden="true" /></button>
+        <ToggleButton className="roomLights lightSwitch" aria-label={`Luzes ${item.name}`} isSelected={on} isDisabled={!item.lights.length || !online} onChange={() => item.lights.forEach(light => command({ kind: 'light.power', deviceId: light.id, on: !on }))}><motion.img className="lineIcon lampSymbol" src={bulbIcon} alt="" aria-hidden="true" animate={{ scale: reducedMotion ? 1 : on ? 1.12 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} /><span className="switchTrack" aria-hidden="true" /></ToggleButton>
+        {item.lights.some(light => controlError[light.id]) && <p className="tileError" role="alert">Falha ao mudar as luzes</p>}
+        {item.lights.some(light => isPending(light.id)) && <span className="tilePending" aria-label="Enviando comando" />}
         {on && <span className="srOnly" role="status" aria-label={`${item.name} luzes ligadas`}>Ligadas</span>}
-      </li>
+      </motion.li>
     })}</ul></section>{alert}
-  </main>
+  </PresenceScreen>}</AnimatePresence></div></LayoutGroup>
 }

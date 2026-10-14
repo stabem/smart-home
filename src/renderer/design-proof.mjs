@@ -50,6 +50,7 @@ try {
     assert.equal(await page.getByRole('list', { name: 'Cômodos' }).getByRole('listitem').count(), 8)
     await page.getByRole('button', { name: 'Luzes Sala de estar' }).click()
     await page.getByRole('status', { name: 'Sala de estar luzes ligadas' }).waitFor()
+    await page.waitForTimeout(250)
     const homeFit = await page.evaluate(() => {
       const shell = globalThis.document.querySelector('.homeScreen').getBoundingClientRect()
       const tiles = [...globalThis.document.querySelectorAll('.roomTile')]

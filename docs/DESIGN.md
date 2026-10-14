@@ -19,6 +19,14 @@ The tray panel follows the compact macOS Sonoma/Sequoia Control Center. Referenc
 - Room content scrolls inside the fixed window only when necessary. The scrollbar is transparent until hover and never reserves a Windows gutter.
 - Toggles and expansion use a 180–220 ms ease-out. The room enters with a short 200 ms slide. Reduced motion removes these effects. Idle home schedules no animation frames.
 
+## Interaction
+
+- Light, room, brightness, color, and AC changes appear in the same render as the press or drag. The command runs in the background. A small dot marks only the affected control while it is pending. Failure restores the last confirmed state and shows a short inline message beside that control.
+- Each device control keeps its own command queue. A brightness or temperature drag waits about 150 ms before sending; further changes replace the unsent value. A refresh lays pending values over device data, so a delayed response cannot erase the user's latest action.
+- React Aria provides switch, toggle, slider, and press behavior. The brightness track follows the pointer without a visible thumb and shows a value bubble during a drag. Keyboard focus stays visible. Controls use a default cursor and a 0.96 pressed scale.
+- Motion animates room push and pop, a subtle shared surface from the room tile to its heading, module expansion, and list layout with short spring motion. The glass sheet stays still while room content moves. Reduced motion removes these effects and the pending pulse. Idle home schedules no animation frames.
+- `?fixture=house&latency=1500&failure=random` exercises slow, occasionally failing commands in a browser. `failure=once` and `failure=always` make rollback repeatable for tests. These flags affect the fixture API only.
+
 ## Group behavior and setup
 
 - Lights in the same room with a shared base and `_N` suffix are suggested as a group. `Office_1` through `Office_4` become **Trilho do Office**. Setup lets the user create a group, edit its name and members, or ungroup it. Membership is saved in the encrypted setup store.

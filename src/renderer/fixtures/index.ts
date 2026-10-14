@@ -29,6 +29,10 @@ export function houseRooms(): Room[] {
 }
 
 export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
+  const params = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search)
+  const latency = Math.min(5000, Math.max(0, Number(params.get('latency') || 0)))
+  const failure = params.get('failure')
+  let failedOnce = false
   let rooms = fixture === 'house' ? houseRooms() : []
   let groups = suggestLightGroups(rooms)
   let configured = fixture === 'house'
@@ -43,6 +47,11 @@ export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
       if (group && command.kind.startsWith('light.')) {
         await Promise.all(group.memberIds.map(deviceId => this.sendCommand({ ...command, deviceId })))
         return
+      }
+      if (latency) await new Promise(resolve => setTimeout(resolve, latency))
+      if (failure === 'always' || failure === 'once' && !failedOnce || failure === 'random' && Math.random() < 0.3) {
+        failedOnce = true
+        throw new Error('Fixture command failed')
       }
       const appearance = command as DeviceCommand | { kind: 'light.color'; deviceId: string; color: string } | { kind: 'light.temperature'; deviceId: string; temperature: number }
       for (const room of rooms) {
