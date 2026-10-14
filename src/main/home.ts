@@ -283,7 +283,7 @@ export class HomeController {
       const desired = this.saved?.groupLastState?.[group.id]
       if (!desired) continue
       const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
-      const patch = Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key))) as Partial<LightState>
+      const patch = (desired.on === false ? { on: false } : Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key)))) as Partial<LightState>
       const drifted = members.filter(light => light.state.online && !light.state.stale && !confirms(light.state, patch))
         .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
       const results = []

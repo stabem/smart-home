@@ -243,8 +243,14 @@ export class TuyaService {
     }
     if (!this.session) { this.logFailure(`${selected.id} step=cloud-set`, device, 'no-session'); return { on: false, online: false } }
     try {
-      const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
-      await this.cloud.sendCommands(this.session, selected.id, commands)
+      const commands = this.cloudCommands(cloudDevice, selected.dp, patch.on === false ? { on: false } : patch)
+      console.warn(`DIAG cloud-set id=${selected.id} cmds=${JSON.stringify(commands)}`)
+      try { await this.cloud.sendCommands(this.session, selected.id, commands) }
+      catch (error) {
+        if (commands.length < 2 || !String((error as Error)?.message).includes('code=2001')) throw error
+        console.warn(`DIAG cloud-set id=${selected.id} bundle rejected 2001; retrying one command per request`)
+        for (const command of commands) await this.cloud.sendCommands(this.session, selected.id, [command])
+      }
       const state = await this.cloudState(selected.id, selected.dp)
       return confirms(state, patch) ? state : { on: false, online: false }
     } catch (error) {
