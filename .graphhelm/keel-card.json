@@ -1,5 +1,21 @@
 {
-  "promise": "rooms() writes a human-readable inventario.md (names, rooms, groups, state) in userData with no secrets; behaviour otherwise unchanged.",
-  "scopePaths": ["src/main/home.ts", "src/main/home.test.ts", ".graphhelm/keel-card.json"],
-  "proof": "npx vitest run src/main/home.test.ts && echo PROOF_OK"
+  "promise": "Fixture-observable cloud commands match the Tuya sharing SDK; a failed LAN socket can reconnect; the 420x640 panel has borderless readable glass in light and dark mode.",
+  "scopePaths": [
+    ".graphhelm/keel-card.json",
+    "src/main/tuya/cloud.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/protocol.ts",
+    "src/main/tuya/tuya.test.ts",
+    "src/renderer/journey-proof.mjs",
+    "src/renderer/style.css",
+    "test-results/design/dark-ac.png",
+    "test-results/design/dark-edit.png",
+    "test-results/design/dark-home.png",
+    "test-results/design/dark-office.png",
+    "test-results/design/light-ac.png",
+    "test-results/design/light-edit.png",
+    "test-results/design/light-home.png",
+    "test-results/design/light-office.png"
+  ],
+  "proof": "npm run test -- src/main/tuya/tuya.test.ts; node src/renderer/design-proof.mjs; node src/renderer/journey-proof.mjs; sh ci/local-ci.sh"
 }

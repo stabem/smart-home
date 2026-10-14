@@ -129,10 +129,14 @@ export class TuyaLanClient {
     let pending: Buffer = Buffer.alloc(0)
     const frames: Frame[] = []
     const waiters: Array<{ cmds: number[]; resolve: (frame: Frame) => void; reject: (error: Error) => void }> = []
+    let terminalError: Error | undefined
     let session: Buffer = key
     let seq = 0
     const timeout = setTimeout(() => socket.destroy(new Error('Tuya device offline')), 1500)
-    const fail = (error: Error): void => { for (const waiter of waiters.splice(0)) waiter.reject(error) }
+    const fail = (error: Error): void => {
+      terminalError ??= error
+      for (const waiter of waiters.splice(0)) waiter.reject(terminalError)
+    }
     socket.on('error', fail)
     socket.on('close', () => fail(new Error('Tuya device offline')))
     socket.on('data', chunk => {
@@ -155,6 +159,7 @@ export class TuyaLanClient {
       } catch (error) { socket.destroy(error as Error) }
     })
     const receive = (...cmds: number[]): Promise<Frame> => {
+      if (terminalError) return Promise.reject(terminalError)
       const index = frames.findIndex(frame => cmds.includes(frame.cmd))
       if (index >= 0) return Promise.resolve(frames.splice(index, 1)[0])
       return new Promise((resolve, reject) => waiters.push({ cmds, resolve, reject }))
