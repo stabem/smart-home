@@ -10,6 +10,7 @@ declare global {
 }
 
 const fixture = new URLSearchParams(location.search).get('fixture')
+if (fixture === 'house' || fixture === 'empty' || !window.api) document.body.classList.add('fixtureMode')
 const api = fixture === 'house' || fixture === 'empty'
   ? createFixtureApi(fixture)
   : window.api ?? createFixtureApi('house')

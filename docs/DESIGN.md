@@ -4,7 +4,7 @@ The tray uses the visual language of macOS Control Center: one frosted sheet ove
 
 ## Window and type
 
-- The popup is 420 × 640 px. The browser fixture draws a soft wallpaper gradient behind it so the glass can be judged.
+- The popup is 420 × 640 px. The browser fixture draws a soft wallpaper gradient behind it so the glass can be judged. The real Electron window keeps a transparent body so Windows acrylic remains visible.
 - Dark glass is `rgba(30,30,32,.62)`; light glass is `rgba(245,245,250,.72)`. It has a 0.5 px inner white stroke (18% dark, 12% light), a 24 px radius, and no outer border. Reduced transparency uses an opaque sheet.
 - Use system UI type, with SF Pro where available and Segoe UI on Windows. Text is compact and tabular numbers keep temperatures stable.
 - Modules use a 16 px radius, 8 px gaps, quiet translucent fill, and no decorative borders. Interactive elements have visible keyboard focus.
@@ -19,7 +19,7 @@ The tray uses the visual language of macOS Control Center: one frosted sheet ove
 ## Room controls
 
 - A simple **Voltar** row precedes a plain 24 px/600 room title. There is no shared surface behind the title.
-- Every light and group has one 36 px circular bulb switch. On is amber `#FFB84D` with a white glyph and a soft 0.5 px inner highlight. Off is 12% white in dark mode or 6% black in light mode, with a 60% glyph. Pressed scale is 0.94.
+- Every light and group has one 36 px circular bulb switch. On is amber `#FFB84D` with a white glyph and a soft 0.5 px inner highlight. Off is 12% white in dark mode or 6% black in light mode, with a 60% glyph. Pressed scale is 0.94. Offline or stale lights disable power, brightness, and color controls.
 - A dimmable light gets a 30 px filled pill slider below the header. The sun sits inside the left end and the percentage inside the right end. A drag can show a small value bubble.
 - Color-capable lights always show five 22 px round swatches and a round **+** button. That button has the accessible name **Cor** and reveals the custom picker and temperature control in normal flow.
 - The AC header is a 36 px snowflake circle, name, and 36 px circular power button. Both circles turn blue `#5AC8FA` when on. The body has **Ambiente 24°** at 13 px, a centered tabular 34 px target with 32 px minus and plus circles, a slider, and three equal-width pills. **Atualizado** or **Offline** stays visible.

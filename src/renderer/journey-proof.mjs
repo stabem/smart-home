@@ -96,7 +96,7 @@ try {
   process.stdout.write('tray-first-setup: passed (fixture, free port)\n')
 
   await page.addInitScript(() => {
-    const room = { id: 'offline-room', name: 'Entrada', lights: [{ id: 'offline-light', name: 'Luz Entrada', state: { on: false, online: false } }], acs: [] }
+    const room = { id: 'offline-room', name: 'Entrada', lights: [{ id: 'offline-light', name: 'Luz Entrada', state: { on: false, online: false, brightness: 70, color: '#ffffff', temperature: 50 } }], acs: [] }
     globalThis.api = {
       getRooms: async () => [room],
       sendCommand: async () => { throw new Error('Offline light must not receive a command') },
@@ -111,7 +111,9 @@ try {
   await page.getByRole('button', { name: 'Abrir Entrada' }).click()
   await page.getByText('Offline', { exact: true }).waitFor()
   assert.equal(await page.getByRole('switch', { name: 'Luz Entrada' }).isDisabled(), true)
-  process.stdout.write('offline-light: passed (room and device controls disabled)\n')
+  assert.equal(await page.getByRole('button', { name: 'Selecionar Azul' }).isDisabled(), true)
+  assert.equal(await page.getByRole('button', { name: 'Cor', exact: true }).isDisabled(), true)
+  process.stdout.write('offline-light: passed (room, device, and color controls disabled)\n')
 } finally {
   await browser?.close()
   await server.close()

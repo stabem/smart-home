@@ -31,13 +31,16 @@
 html, body, #root { width: 100%; min-height: 100%; margin: 0; }
 body {
   color: var(--ink);
+  background: transparent;
+}
+body.fixtureMode {
   background:
     radial-gradient(circle at 14% 86%, #e7ad91 0, transparent 45%),
     radial-gradient(circle at 89% 9%, #8fbaca 0, transparent 49%),
     linear-gradient(135deg, #e5b3ae, #c2d2dd 60%, #a3b8d7);
 }
 @media (prefers-color-scheme: dark) {
-  body {
+  body.fixtureMode {
     background:
       radial-gradient(circle at 12% 82%, #a65b48 0, transparent 45%),
       radial-gradient(circle at 91% 13%, #456b94 0, transparent 52%),
