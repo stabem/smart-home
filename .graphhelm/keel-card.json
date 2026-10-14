@@ -1,10 +1,15 @@
 {
-  "promise": "Discovery and migration place the Cozinha gangs and Corredor in the owner's rooms while preserving saved name and room edits.",
+  "promise": "A Tuya device reported offline by Smart Life or code 2001 appears as Sem energia, receives no sync or LAN hammering, and command fallback preserves safe power and per-command behavior.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/house-defaults.ts",
+    "src/shared/types.ts",
+    "src/main/tuya/cloud.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/tuya.test.ts",
+    "src/main/light-groups.ts",
     "src/main/home.ts",
-    "src/main/home.test.ts"
+    "src/main/home.test.ts",
+    "src/renderer/App.tsx"
   ],
-  "proof": "npx vitest run src/main/home.test.ts; sh ci/local-ci.sh"
+  "proof": "npx vitest run src/main/tuya/tuya.test.ts src/main/home.test.ts; sh ci/local-ci.sh"
 }

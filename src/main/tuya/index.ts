@@ -48,6 +48,10 @@ export class TuyaService {
   private readonly devices = new Map<string, LanDevice & { category: string }>()
   private readonly lastStates = new Map<string, LightState>()
   private readonly observedMaps = new Map<string, Record<string, number>>()
+  private readonly workingVersions = new Map<string, TuyaVersion>()
+  private readonly lanFailures = new Map<string, { count: number; retryAt: number }>()
+  private readonly lanTails = new Map<string, Promise<void>>()
+  private readonly offlineIds = new Set<string>()
   private session: SmartLifeSession | null = null
   private homes: SmartLifeHome[] = []
   private addressSink: ((homes: SmartLifeHome[]) => void) | null = null
@@ -72,6 +76,8 @@ export class TuyaService {
     this.session = session
     this.homes = await this.cloud.listHomes(session)
     this.observedMaps.clear()
+    this.offlineIds.clear()
+    for (const home of this.homes) for (const device of home.devices) if (device.online === false) this.offlineIds.add(device.id)
     for (const home of this.homes) for (const device of home.devices) device.ip = undefined
     await this.resolveAddresses()
     this.startRefresh()
@@ -83,6 +89,8 @@ export class TuyaService {
     this.session = session ?? null
     this.homes = homes
     this.observedMaps.clear()
+    this.offlineIds.clear()
+    for (const home of homes) for (const device of home.devices) if (device.online === false) this.offlineIds.add(device.id)
     this.cloud.registerHomes?.(homes)
     let scrubbed = false
     for (const home of homes) for (const device of home.devices) if (device.ip && !isLanIp(device.ip)) {
@@ -117,10 +125,54 @@ export class TuyaService {
     console.warn(`Tuya id=${id} ip=${device?.ip ?? 'unknown'} v=${device?.version ?? 'unknown'} err=${safe}`)
   }
 
+  private offlineState(): LightState { return { on: false, online: false, reason: 'sem energia ou fora da rede' } }
+
+  private isOfflineError(error: unknown): boolean {
+    return error instanceof Error && /code=2001(?:\s|$)/.test(error.message)
+  }
+
+  private async cloudOnline(id: string): Promise<boolean | undefined> {
+    if (!this.session || !this.cloud.deviceStatus) return this.offlineIds.has(id) || this.cloud.deviceOnline?.(id) === false ? false : undefined
+    try {
+      await this.cloud.deviceStatus(this.session, id)
+      const online = this.cloud.deviceOnline?.(id)
+      if (online === false) this.offlineIds.add(id)
+      if (online === true) this.offlineIds.delete(id)
+      const stored = this.homes.flatMap(home => home.devices).find(device => device.id === id)
+      if (stored && typeof online === 'boolean') stored.online = online
+      return online ?? (this.offlineIds.has(id) ? false : undefined)
+    } catch (error) {
+      if (this.isOfflineError(error)) { this.offlineIds.add(id); return false }
+      if (this.cloud.deviceOnline?.(id) === false) this.offlineIds.add(id)
+      return this.offlineIds.has(id) ? false : undefined
+    }
+  }
+
+  private async lanRequest(device: LanDevice, dps?: Dps): Promise<Dps> {
+    const previous = this.lanTails.get(device.id) ?? Promise.resolve()
+    let release!: () => void
+    const tail = new Promise<void>(resolve => { release = resolve })
+    this.lanTails.set(device.id, tail)
+    await previous
+    try { return await this.lan.request(device, dps) }
+    finally { release(); if (this.lanTails.get(device.id) === tail) this.lanTails.delete(device.id) }
+  }
+
+  private canTryLan(id: string): boolean { return Date.now() >= (this.lanFailures.get(id)?.retryAt ?? 0) && !this.offlineIds.has(id) }
+  private failedLan(id: string): void {
+    const count = (this.lanFailures.get(id)?.count ?? 0) + 1
+    this.lanFailures.set(id, { count, retryAt: Date.now() + Math.min(300_000, 5_000 * 2 ** (count - 1)) })
+  }
+  private succeededLan(id: string, version: TuyaVersion): void {
+    this.workingVersions.set(id, version)
+    this.lanFailures.delete(id)
+  }
+
   private async resolveAddresses(): Promise<void> {
     if (this.refreshing) return
     this.refreshing = true
     try {
+    for (const device of this.homes.flatMap(home => home.devices).filter(device => device.online === false)) await this.cloudOnline(device.id)
     const deadline = Date.now() + 8000
     const withinDeadline = async <T>(work: Promise<T>): Promise<T | undefined> => {
       const remaining = deadline - Date.now()
@@ -131,7 +183,7 @@ export class TuyaService {
     }
     const addresses = await withinDeadline(this.scan().catch(() => new Map<string, { id: string; ip: string; version?: TuyaVersion }>()))
       ?? new Map<string, { id: string; ip: string; version?: TuyaVersion }>()
-    const missing = this.homes.flatMap(home => home.devices).filter(device => device.localKey && !isLanIp(addresses.get(device.id)?.ip ?? '') && !isLanIp(device.ip ?? ''))
+    const missing = this.homes.flatMap(home => home.devices).filter(device => device.localKey && device.online !== false && this.canTryLan(device.id) && !isLanIp(addresses.get(device.id)?.ip ?? '') && !isLanIp(device.ip ?? ''))
     if (missing.length) {
       const candidates = await withinDeadline(this.probe(undefined, undefined, undefined, deadline).catch(() => [])) ?? []
       for (const ip of candidates) {
@@ -139,11 +191,12 @@ export class TuyaService {
         for (const device of [...missing]) {
           if (Date.now() >= deadline) break
           const known = versions.includes(device.version as TuyaVersion) ? device.version as TuyaVersion : '3.3'
-          for (const version of [known, ...versions.filter(value => value !== known)]) {
+          for (const version of this.workingVersions.has(device.id) ? [this.workingVersions.get(device.id)!] : [known, ...versions.filter(value => value !== known)]) {
             if (Date.now() >= deadline) break
             try {
-              const dps = await withinDeadline(this.lan.request({ id: device.id, ip, localKey: device.localKey, version }))
+              const dps = await withinDeadline(this.lanRequest({ id: device.id, ip, localKey: device.localKey, version }))
               if (!dps || !Object.values(dps).some(value => typeof value === 'boolean')) continue
+              this.succeededLan(device.id, version)
               addresses.set(device.id, { id: device.id, ip, version })
               missing.splice(missing.indexOf(device), 1)
               break
@@ -159,7 +212,7 @@ export class TuyaService {
       const announced = addresses.get(device.id)
       const lan = announced && isLanIp(announced.ip) ? announced : undefined
       const ip = lan?.ip ?? (isLanIp(device.ip ?? '') ? device.ip : undefined)
-      const version = lan?.version ?? device.version
+      const version = this.workingVersions.get(device.id) ?? lan?.version ?? device.version
       if (device.ip !== ip || device.version !== version) changed = true
       device.ip = ip
       device.version = version
@@ -167,7 +220,7 @@ export class TuyaService {
       if (ip && device.localKey) {
         const entry = { id: device.id, ip, localKey: device.localKey, version: versions.includes(version as TuyaVersion) ? version as TuyaVersion : '3.3' as const, category: device.category }
         this.devices.set(device.id, entry)
-        if (Date.now() < deadline) await withinDeadline(this.populateChannels(device, entry))
+        if (device.online !== false && this.canTryLan(device.id) && Date.now() < deadline) await withinDeadline(this.populateChannels(device, entry))
       }
     }
     if (changed) this.addressSink?.(this.homes)
@@ -178,7 +231,8 @@ export class TuyaService {
     const selected = channel(id)
     const device = this.devices.get(selected.id)
     const cloudDevice = this.homes.flatMap(home => home.devices).find(value => value.id === selected.id)
-    if (device) {
+    if (device && await this.cloudOnline(selected.id) === false) return this.offlineState()
+    if (device && this.canTryLan(selected.id)) {
       try {
         const dps = await this.requestWithFallback(device)
         const map = cloudDevice?.category === 'dj' ? lightMap(cloudDevice, dps) : undefined
@@ -193,15 +247,17 @@ export class TuyaService {
   }
 
   async setLight(id: string, patch: LightPatch): Promise<LightState> {
+    patch = patch.on === false ? { on: false } : patch
     const selected = channel(id)
     const device = this.devices.get(selected.id)
     const cloudDevice = this.homes.flatMap(home => home.devices).find(value => value.id === selected.id)
     if (!cloudDevice) return { on: false, online: false }
+    if (await this.cloudOnline(selected.id) === false) return this.offlineState()
     const dps: Dps = {}
     const light = cloudDevice.category === 'dj'
     if (!light && !['kg', 'cz'].includes(cloudDevice.category)) throw new Error('Unsupported Tuya light category')
     let map = this.observedMaps.get(selected.id) ?? lightMap(cloudDevice)
-    if (device && light && !cloudDevice.dpMap && !this.observedMaps.has(selected.id)) {
+    if (device && this.canTryLan(selected.id) && light && !cloudDevice.dpMap && !this.observedMaps.has(selected.id)) {
       try { map = lightMap(cloudDevice, await this.requestWithFallback(device)); this.observedMaps.set(selected.id, map) }
       catch { /* Use cloud control after the LAN attempt. */ }
     }
@@ -227,53 +283,57 @@ export class TuyaService {
       if (mode) dps[String(mode.dp)] = 'colour'
     }
     if (!Object.keys(dps).length) return this.getState(id)
-    if (device) {
+    if (device && this.canTryLan(selected.id)) {
       try {
-        try { await this.lan.request(device, dps) }
+        try { await this.lanRequest(device, dps); this.succeededLan(device.id, device.version) }
         catch (error) {
           // A reset invalidates the negotiated 3.5 session. A new request gets a new socket and handshake.
           if (device.version !== '3.5' || !(error instanceof Error) || !/ECONNRESET|socket hang up/i.test(error.message)) throw error
-          await this.lan.request(device, dps)
+          await this.lanRequest(device, dps); this.succeededLan(device.id, device.version)
         }
         const state = await this.getState(id)
         if (confirms(state, patch)) return state
         throw new Error('LAN set was not confirmed by status')
       }
-      catch (error) { this.logFailure(`${selected.id} step=lan-set`, device, error) }
+      catch (error) { this.failedLan(selected.id); this.logFailure(`${selected.id} step=lan-set`, device, error) }
     }
     if (!this.session) { this.logFailure(`${selected.id} step=cloud-set`, device, 'no-session'); return { on: false, online: false } }
     try {
       const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
-      await this.cloud.sendCommands(this.session, selected.id, commands)
+      try { await this.cloud.sendCommands(this.session, selected.id, commands) }
+      catch (error) {
+        if (commands.length < 2 || this.isOfflineError(error)) throw error
+        this.logFailure(`${selected.id} step=cloud-bundle`, device, error)
+        for (const command of commands) await this.cloud.sendCommands(this.session, selected.id, [command])
+      }
       const state = await this.cloudState(selected.id, selected.dp)
       return confirms(state, patch) ? state : { on: false, online: false }
     } catch (error) {
       this.logFailure(`${selected.id} step=cloud-set`, device, error)
+      if (this.isOfflineError(error)) { this.offlineIds.add(selected.id); return this.offlineState() }
       if (error instanceof SmartLifeRateLimitError) throw error
       return { on: false, online: false }
     }
   }
 
   private async requestWithFallback(device: LanDevice, dps?: Dps): Promise<Dps> {
-    const order = [device.version, ...versions.filter(version => version !== device.version)]
+    if (!this.canTryLan(device.id)) throw new Error('Tuya LAN cooling down')
+    const known = this.workingVersions.get(device.id)
+    const order = known ? [known] : [device.version, ...versions.filter(version => version !== device.version)]
     let lastError: unknown
     for (const version of order) {
+      if (!this.canTryLan(device.id)) throw new Error('Tuya LAN cooling down')
       try {
-        const result = await this.lan.request({ ...device, version }, dps)
+        const result = await this.lanRequest({ ...device, version }, dps)
         device.version = version
+        this.succeededLan(device.id, version)
         return result
       } catch (error) {
         lastError = error
         this.logFailure(device.id, { ...device, version }, error)
       }
     }
-    const cached = this.homes.flatMap(home => home.devices).find(value => value.id === device.id)
-    if (cached?.ip === device.ip) {
-      cached.ip = undefined
-      this.devices.delete(device.id)
-      this.addressSink?.(this.homes)
-      void this.resolveAddresses().catch(() => {})
-    }
+    this.failedLan(device.id)
     throw lastError
   }
 
@@ -313,6 +373,10 @@ export class TuyaService {
     if (!device) return { on: false, online: false }
     try {
       const status = await this.cloud.deviceStatus(this.session, id)
+      const online = this.cloud.deviceOnline?.(id)
+      if (online === false) this.offlineIds.add(id)
+      if (online === true) this.offlineIds.delete(id)
+      if (online === false || this.offlineIds.has(id)) return this.offlineState()
       const on = device.category === 'dj' ? status.switch_led ?? status.switch_1 : status[`switch_${dp}`] ?? status.switch
       if (typeof on !== 'boolean') return { on: false, online: false }
       const state: LightState = { on, online: true, viaCloud: true }
@@ -336,6 +400,8 @@ export class TuyaService {
       return state
     } catch (error) {
       this.logFailure(`${id} step=cloud-read`, this.devices.get(id), error)
+      if (this.isOfflineError(error)) { this.offlineIds.add(id); return this.offlineState() }
+      if (this.offlineIds.has(id) || this.cloud.deviceOnline?.(id) === false) return this.offlineState()
       if (error instanceof SmartLifeRateLimitError || this.cloud.isRateLimited?.()) {
         const cached = this.lastStates.get(dp === 1 ? id : `${id}::${dp}`)
         return { ...(cached ?? { on: false, online: false }), stale: true }
