@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomInt, randomUUID } from 'node:crypto'
 
 const LOGIN_URL = 'https://apigw.iotbing.com'
 const CLIENT_ID = 'HA_3y9q4ak7g4ephrvke'
@@ -80,7 +80,9 @@ function secretFor(rid: string, refreshToken: string): { hashKey: string; secret
   return { hashKey, secret: Buffer.from(secret) }
 }
 function encrypt(value: object, secret: Buffer): string {
-  const nonce = randomBytes(12)
+  // CustomerApi uses a 12-byte ASCII nonce, then concatenates two base64 blocks.
+  const alphabet = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678'
+  const nonce = Buffer.from(Array.from({ length: 12 }, () => alphabet[randomInt(alphabet.length)]).join(''))
   const cipher = createCipheriv('aes-128-gcm', secret, nonce)
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value)), cipher.final(), cipher.getAuthTag()])
   return Buffer.from(nonce.toString('base64') + ciphertext.toString('base64')).toString('utf8')
@@ -246,8 +248,9 @@ export class SmartLifeCloud {
         }
         const entries = [device.status, device.functions].flatMap(value => Array.isArray(value) ? value :
           value && typeof value === 'object' ? Object.entries(value).map(([code, detail]) => ({ code, ...(detail && typeof detail === 'object' ? detail : {}) })) : [])
-        result.cloudCodes = [...new Set(entries.filter(value => value && typeof value === 'object')
-          .map(value => String((value as Record<string, unknown>).code ?? '')).filter(Boolean))]
+        // Status reports may include read-only codes. Only functions are writable.
+        result.cloudCodes = (Array.isArray(device.functions) ? device.functions : []).filter(value => value && typeof value === 'object')
+          .map(value => String((value as Record<string, unknown>).code ?? '')).filter(Boolean)
         const channels = new Map<number, string>()
         for (const value of entries) {
           if (!value || typeof value !== 'object') continue
@@ -273,6 +276,9 @@ export class SmartLifeCloud {
             let specification: Record<string, unknown> = {}
             try { specification = record(await this.request(session, `/v1.1/m/life/${encodeURIComponent(result.id)}/specifications`)) }
             catch { /* Some sharing accounts expose only the local status strategy. */ }
+            if (Array.isArray(specification.functions)) result.cloudCodes = specification.functions
+              .filter(value => value && typeof value === 'object')
+              .map(value => String((value as Record<string, unknown>).code ?? '')).filter(Boolean)
             const mapped: Record<string, number> = {}
             for (const item of [...(Array.isArray(specification.functions) ? specification.functions : []),
               ...(Array.isArray(specification.status) ? specification.status : [])]) {

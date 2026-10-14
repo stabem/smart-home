@@ -229,7 +229,12 @@ export class TuyaService {
     if (!Object.keys(dps).length) return this.getState(id)
     if (device) {
       try {
-        await this.lan.request(device, dps)
+        try { await this.lan.request(device, dps) }
+        catch (error) {
+          // A reset invalidates the negotiated 3.5 session. A new request gets a new socket and handshake.
+          if (device.version !== '3.5' || !(error instanceof Error) || !/ECONNRESET|socket hang up/i.test(error.message)) throw error
+          await this.lan.request(device, dps)
+        }
         const state = await this.getState(id)
         if (confirms(state, patch)) return state
         throw new Error('LAN set was not confirmed by status')
@@ -273,8 +278,13 @@ export class TuyaService {
   }
 
   private cloudCommands(device: SmartLifeDevice, dp: number, patch: LightPatch): Array<{ code: string; value: unknown }> {
-    const supported = new Set([...(device.cloudCodes ?? []), ...Object.keys(device.dpMap ?? {})])
-    const choose = (...codes: string[]): string => codes.find(code => supported.has(code)) ?? codes[0]
+    const supported = new Set(device.cloudCodes ?? [])
+    const choose = (...codes: string[]): string => {
+      const found = codes.find(code => supported.has(code))
+      if (found) return found
+      if (supported.size) throw new Error(`Smart Life function unavailable: ${codes.join('/')}`)
+      return codes[0]
+    }
     const commands: Array<{ code: string; value: unknown }> = []
     if (patch.on !== undefined) commands.push({ code: device.category === 'dj' ? choose('switch_led', 'switch_1') : choose(`switch_${dp}`, 'switch'), value: patch.on })
     if (patch.brightness !== undefined) {
@@ -289,9 +299,10 @@ export class TuyaService {
       const code = choose('colour_data_v2', 'colour_data')
       const hex = encodeHsv(patch.color)
       const factor = code === 'colour_data_v2' ? 1 : 255 / 1000
-      commands.push({ code: 'work_mode', value: 'colour' }, { code, value: {
+      if (!supported.size || supported.has('work_mode')) commands.push({ code: 'work_mode', value: 'colour' })
+      commands.push({ code, value: JSON.stringify({
         h: parseInt(hex.slice(0, 4), 16), s: Math.round(parseInt(hex.slice(4, 8), 16) * factor),
-        v: Math.round(parseInt(hex.slice(8, 12), 16) * factor) } })
+        v: Math.round(parseInt(hex.slice(8, 12), 16) * factor) }) })
     }
     return commands
   }
@@ -309,7 +320,10 @@ export class TuyaService {
       const temperature = status.temp_value_v2 ?? status.temp_value
       if (typeof brightness === 'number') state.brightness = scale(brightness, status.bright_value_v2 !== undefined ? 'bright_value_v2' : 'bright_value', false)
       if (typeof temperature === 'number') state.temperature = scale(temperature, status.temp_value_v2 !== undefined ? 'temp_value_v2' : 'temp_value', false)
-      const colour = status.colour_data_v2 ?? status.colour_data
+      let colour = status.colour_data_v2 ?? status.colour_data
+      if (typeof colour === 'string') {
+        try { colour = JSON.parse(colour) as unknown } catch { /* Invalid device color is ignored. */ }
+      }
       if (colour && typeof colour === 'object' && !Array.isArray(colour)) {
         const hsv = colour as Record<string, unknown>
         if (['h', 's', 'v'].every(key => typeof hsv[key] === 'number')) {

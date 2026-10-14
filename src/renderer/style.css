@@ -88,3 +88,22 @@ button,.react-aria-Button,.react-aria-Switch,.react-aria-ToggleButton,.react-ari
 .roomTitle{position:relative}.sharedRoomSurface{position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:15px;background:rgba(255,255,255,.045)}.roomTitle .sharedRoomSurface{inset:-5px -8px;border-radius:12px}.roomTitle h1,.roomTile>button{position:relative;z-index:1}.roomTile>.roomLights{position:absolute}
 .lightSwitch[data-focus-visible],.acActions label[data-focus-visible],.roomLights[data-focus-visible]{outline:3px solid var(--blue);outline-offset:3px}
 input[type=range]{cursor:default}
+
+/* Issue 34: soft glass edge and translucent, lit modules. */
+:root{--tile:rgba(255,255,255,.55);--warm:rgba(244,177,67,.55);--cool:rgba(91,168,218,.45)}
+@media(prefers-color-scheme:dark){:root{--tile:rgba(255,255,255,.10);--warm:rgba(220,147,43,.43);--cool:rgba(70,156,217,.39)}}
+.shell,.viewStage::before{border:0;border-radius:26px;box-shadow:0 1px 2px #0c172026,0 26px 65px #18263535}
+.shell{background:var(--glass);backdrop-filter:blur(42px) saturate(1.45);-webkit-backdrop-filter:blur(42px) saturate(1.45)}
+.shell::before,.viewStage::after{content:'';position:absolute;inset:0;z-index:0;border-radius:inherit;pointer-events:none;background:linear-gradient(125deg,rgba(255,255,255,.18),rgba(255,255,255,.04) 44%,transparent 70%);box-shadow:inset .5px .5px rgba(255,255,255,.18),inset -.5px -.5px rgba(255,255,255,.04)}
+.shell>*{position:relative;z-index:1}
+.viewStage::before{background:var(--glass);backdrop-filter:blur(42px) saturate(1.45);-webkit-backdrop-filter:blur(42px) saturate(1.45)}
+.viewStage::after{z-index:0}
+.viewStage .shell{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}
+.viewStage .shell::before{display:none}
+.homeSummary,.roomTile,.devicePanel,.acPanel{border:0;border-radius:18px;background:linear-gradient(155deg,rgba(255,255,255,.11),transparent 58%),var(--tile);box-shadow:inset .5px .5px rgba(255,255,255,.17)}
+.roomTile.isLit{background:linear-gradient(145deg,rgba(255,239,197,.30),transparent 64%),var(--warm)}
+.roomTile.isCool{background:linear-gradient(145deg,rgba(207,238,255,.30),transparent 64%),var(--cool)}
+.controlError,.tileError,.groupError,.acError{display:table;width:fit-content;max-width:100%;padding:3px 7px;border-radius:999px;background:rgba(167,53,44,.16);color:var(--alert);font-size:10px;line-height:1.2}
+.tileError{max-width:calc(100% - 45px);margin:0}
+@media(prefers-color-scheme:dark){.homeSummary,.roomTile,.devicePanel,.acPanel{background:linear-gradient(155deg,rgba(255,255,255,.10),transparent 58%),var(--tile)}.roomTile.isLit{background:linear-gradient(145deg,rgba(255,209,127,.26),transparent 64%),var(--warm)}.roomTile.isCool{background:linear-gradient(145deg,rgba(150,217,255,.24),transparent 64%),var(--cool)}.controlError,.tileError,.groupError,.acError{color:#ffd1cb;background:rgba(143,38,36,.45)}}
+@media(prefers-reduced-transparency:reduce){.shell,.viewStage::before{background:#eef0f2;backdrop-filter:none;-webkit-backdrop-filter:none}}@media(prefers-reduced-transparency:reduce) and (prefers-color-scheme:dark){.shell,.viewStage::before{background:#272d35}}
