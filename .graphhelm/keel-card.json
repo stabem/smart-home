@@ -1,5 +1,16 @@
 {
-  "promise": "When an AC is on, its module shows three soft drifting cool streaks (CSS), pauses when the popup is hidden, static under reduced motion; the dead air.lottie is removed. Nothing else changes.",
-  "scopePaths": ["src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/main.tsx", "src/renderer/assets/lottie/air.lottie", "docs/CREDITS.md", ".graphhelm/keel-card.json"],
-  "proof": "sh ci/local-ci.sh && echo PROOF_OK"
+  "promise": "LG 2304 returns OFF to the renderer before the repair read, then refreshes state without letting a stale ON read replace that OFF.",
+  "scopePaths": [
+    ".graphhelm/keel-card.json",
+    "src/main/home.test.ts",
+    "src/main/home.ts",
+    "src/main/lg/client.test.ts",
+    "src/main/lg/client.ts",
+    "src/preload/index.test.ts",
+    "src/preload/index.ts",
+    "src/renderer/App.tsx",
+    "src/shared/types.ts",
+    "tests/interaction.spec.ts"
+  ],
+  "proof": "npx vitest run src/main/home.test.ts; SMART_HOME_TEST_PORT=5175 npx playwright test tests/interaction.spec.ts -g 'LG 2304 turns'; sh ci/local-ci.sh"
 }

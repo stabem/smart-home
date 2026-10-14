@@ -1,4 +1,4 @@
-import type { AirConditioner, DeviceCommand, Light, Room, SetupStatus } from '../shared/types'
+import type { AcState, AirConditioner, DeviceCommand, Light, Room, SetupStatus } from '../shared/types'
 import { LgClient } from './lg/client'
 import { SetupStore, type SavedSetup } from './store'
 import { app } from 'electron'
@@ -115,6 +115,7 @@ function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boo
 }
 
 export class HomeController {
+  private readonly authoritativeOff = new Set<string>()
   private saved: SavedSetup | null
   private draft: SavedSetup | null = null
   private qrToken: string | null = null
@@ -351,9 +352,10 @@ export class HomeController {
   private async acState(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
+    if (this.authoritativeOff.has(ac.id)) ac.state = { ...ac.state, on: false }
   }
 
-  async command(command: unknown): Promise<void> {
+  async command(command: unknown): Promise<void | { ok: boolean; state: AcState; error?: string }> {
     if (!isDeviceCommand(command)) throw new Error('Invalid device command')
     if (!this.saved) throw new Error('Configure devices before sending commands')
     await this.ready
@@ -393,12 +395,55 @@ export class HomeController {
           : command.kind === 'ac.mode' ? { mode: command.mode }
             : command.kind === 'ac.fan' ? { fan: command.fan }
               : { turbo: command.on }
-      try { await this.lg.setAc(ac.id, patch) }
-      catch (error) {
-        console.error(`LG AC control failed id=${ac.id}: ${error instanceof Error ? error.message : 'UnknownError'}`)
-        throw error
+      const deadlineController = patch.on === true ? new AbortController() : undefined
+      const deadline = deadlineController?.signal
+      const deadlineTimer = deadlineController ? setTimeout(() => deadlineController.abort(), 6000) : undefined
+      let state: AcState | undefined
+      let errorMessage: string | undefined
+      let code = 'other'
+      const read = async (signal?: AbortSignal): Promise<AcState | undefined> => {
+        if (signal?.aborted) return undefined
+        return new Promise(resolve => {
+          const aborted = () => resolve(undefined)
+          signal?.addEventListener('abort', aborted, { once: true })
+          this.lg!.getAcState(ac.id, signal).then(resolve, () => resolve(undefined))
+            .finally(() => signal?.removeEventListener('abort', aborted))
+        })
       }
-      return
+      try {
+        await this.lg.setAc(ac.id, patch, deadline)
+        if (patch.on === true) {
+          for (let attempt = 0; attempt < 3 && !state?.on && !deadline?.aborted; attempt++) {
+            await new Promise<void>(resolve => {
+              const timer = setTimeout(resolve, 2000)
+              deadline?.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+            })
+            state = await read(deadline) ?? state
+          }
+          if (!state?.on) errorMessage = 'O ar não ligou. Confira se ele está na tomada e tente de novo.'
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        code = /^LG API request failed \(\d{3}\): (2304|2207)(?::|\b)/.exec(message)?.[1] ?? 'other'
+        errorMessage = code === '2304' ? 'O ar está desligado. Ligue primeiro.' : 'Ar não respondeu. Tente novamente.'
+        if (code === '2304') {
+          this.authoritativeOff.add(ac.id)
+          ac.state = { ...ac.state, on: false, online: true }
+          console.info(`LG control result=failed kind=${command.kind} code=2304`)
+          if (deadlineTimer) clearTimeout(deadlineTimer)
+          return { ok: false, state: ac.state, error: errorMessage }
+        }
+      }
+      if (!state) state = await read(deadline)
+      if (!state) {
+        state = { ...offlineAc }
+        errorMessage ??= 'Ar não respondeu. Tente novamente.'
+      }
+      if (patch.on === true && !!errorMessage) state = { ...state, on: false }
+      if (patch.on === true && !errorMessage && state.on) this.authoritativeOff.delete(ac.id)
+      console.info(`LG control result=${errorMessage ? 'failed' : 'ok'} kind=${command.kind} code=${code}`)
+      if (deadlineTimer) clearTimeout(deadlineTimer)
+      return { ok: !errorMessage, state, ...(errorMessage ? { error: errorMessage } : {}) }
     }
     throw new Error('Device not found')
   }

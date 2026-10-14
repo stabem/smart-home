@@ -19,6 +19,33 @@ function mockFetch(responses: Record<string, unknown>): typeof fetch {
 }
 
 describe('ThinQ AC client', () => {
+  it('logs only known state enums when LG returns a secret in mode or fan', async () => {
+    const secret = 'SENTINEL-LG-SECRET'
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const fetcher = mockFetch({
+        '/devices/ac-1/profile': { property: { airFlow: { windStrength: { mode: ['r'] } } } },
+        '/devices/ac-1/state': { operation: { airConOperationMode: 'POWER_ON' }, temperature: { targetTemperatureC: 23 },
+          airConJobMode: { currentJobMode: secret }, airFlow: { windStrength: secret } }
+      })
+      await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')
+      expect(log).toHaveBeenCalledWith('LG state id=ac-1 result=ok operation=POWER_ON mode=other fan=other')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
+    } finally { log.mockRestore() }
+  })
+  it('logs a fixed failure reason with the id prefix when a state read fails, never the response text', async () => {
+    const secret = 'SENTINEL-LG-SECRET'
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const missing = mockFetch({ '/devices/ac-1/state': { temperature: { targetTemperatureC: 23 }, note: secret } })
+      await expect(new LgClient('test-token', 'BR', missing).getAcState('ac-1')).rejects.toThrow('power state missing')
+      expect(log).toHaveBeenCalledWith('LG state id=ac-1 result=failed reason=no-operation')
+      const failing = vi.fn(async () => new Response(JSON.stringify({ error: { code: '1000', message: secret } }), { status: 500 })) as unknown as typeof fetch
+      await expect(new LgClient('test-token', 'BR', failing).getAcState('ac-2')).rejects.toThrow()
+      expect(log).toHaveBeenCalledWith('LG state id=ac-2 result=failed reason=http-500')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
+    } finally { log.mockRestore() }
+  })
   it('lists only ACs and maps their state', async () => {
     const fetcher = mockFetch({
       '/devices/ac-1/profile': profile,

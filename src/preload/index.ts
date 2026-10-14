@@ -1,10 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { SmartHomeApi } from '../shared/types'
 
+export async function sendCommand(command: Parameters<SmartHomeApi['sendCommand']>[0]): ReturnType<SmartHomeApi['sendCommand']> {
+  try { return await ipcRenderer.invoke('device:command', command) }
+  catch (cause) {
+    const message = cause instanceof Error ? cause.message : ''
+    const prefix = "Error invoking remote method 'device:command': Error: "
+    throw new Error(message.startsWith(prefix) ? message.slice(prefix.length) : message)
+  }
+}
+
 const api: SmartHomeApi = {
   fitWindow: (contentHeight) => ipcRenderer.send('window:fit', contentHeight),
   getRooms: () => ipcRenderer.invoke('rooms:list'),
-  sendCommand: (command) => ipcRenderer.invoke('device:command', command),
+  sendCommand,
   getLaunchAtLogin: () => ipcRenderer.invoke('login:get'),
   setLaunchAtLogin: (enabled) => ipcRenderer.invoke('login:set', enabled),
   getSetupStatus: () => ipcRenderer.invoke('setup:status'),

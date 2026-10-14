@@ -67,7 +67,7 @@ export interface SetupStatus {
 export interface SmartHomeApi {
   fitWindow?(contentHeight: number): void
   getRooms(): Promise<Room[]>
-  sendCommand(command: DeviceCommand): Promise<void>
+  sendCommand(command: DeviceCommand): Promise<void | { ok: boolean; state: AcState; error?: string }>
   getLaunchAtLogin(): Promise<boolean>
   setLaunchAtLogin(enabled: boolean): Promise<void>
   getSetupStatus(): Promise<SetupStatus>
