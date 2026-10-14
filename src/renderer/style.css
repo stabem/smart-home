@@ -56,6 +56,13 @@ button:focus-visible, input:focus-visible, select:focus-visible,
   outline: 2px solid #147db2;
   outline-offset: 3px;
 }
+.lightSwitch[data-focus-visible], .lightSwitch:has(input:focus-visible),
+.acActions label:has(input:focus-visible), .roomLights[data-focus-visible],
+.brightnessSlider:has(.ghostThumb:focus-visible) .sliderTrack,
+.acSlider:has(.ghostThumb:focus-visible) .sliderTrack {
+  outline: 2px solid #147db2;
+  outline-offset: 3px;
+}
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .lineIcon { display: block; width: 19px; height: 19px; }
 .viewStage { position: relative; width: min(100%, 420px); height: 640px; margin: 0 auto; }
