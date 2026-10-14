@@ -288,6 +288,104 @@ describe('Smart Life QR flow', () => {
     expect(fetcher).toHaveBeenCalledOnce()
     expect(String(fetcher.mock.calls[0][0])).toContain('/v1.0/m/life/ha/home/devices')
   })
+  it('never confirms a command from a status batch that started before the command, even for four channels of one device', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const old = [{ id: 'sw', status: [1, 2, 3, 4].map(dp => ({ code: `switch_${dp}`, value: false })) }]
+    const fresh = [{ id: 'sw', status: [1, 2, 3, 4].map(dp => ({ code: `switch_${dp}`, value: true })) }]
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      if (statusCalls === 1) { await gate; return { ok: true, json: async () => ({ success: true, result: old }) } }
+      return { ok: true, json: async () => ({ success: true, result: fresh }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    const early = cloud.deviceStatus(session, 'sw')            // batch starts BEFORE the commands and is held open
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await Promise.all([1, 2, 3, 4].map(dp => cloud.sendCommands(session, 'sw', [{ code: `switch_${dp}`, value: true }])))
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const confirmations = [1, 2, 3, 4].map(() => cloud.deviceStatus(session, 'sw'))
+    release()                                                    // the old batch resolves AFTER the commands, with OLD data
+    expect(await early).toMatchObject({ switch_1: false })
+    const results = await Promise.all(confirmations)
+    results.forEach(status => expect(status).toMatchObject({ switch_1: true, switch_2: true, switch_3: true, switch_4: true }))
+    expect(statusCalls).toBeGreaterThanOrEqual(2)
+  })
+  it('fails confirmation when the fresh batch omits the device instead of reusing the pre-command entry', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      if (statusCalls === 1) { await gate; return { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: true }] }] }) } }
+      return { ok: true, json: async () => ({ success: true, result: [] }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    const early = cloud.deviceStatus(session, 'sw')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await cloud.sendCommands(session, 'sw', [{ code: 'switch_1', value: true }])
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const confirmation = cloud.deviceStatus(session, 'sw')
+    release()
+    expect(await early).toMatchObject({ switch_1: true })
+    await expect(confirmation).rejects.toThrow('missing device')
+  })
+  it('does not return an expired post-command entry when the new batch omits the device', async () => {
+    let now = 100_000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    try {
+      let statusCalls = 0
+      const fetcher = vi.fn(async (url: string) => {
+        if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+        statusCalls++
+        return { ok: true, json: async () => ({ success: true, result: statusCalls === 1 ? [{ id: 'sw', status: [{ code: 'switch_1', value: true }] }] : [] }) }
+      })
+      const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => now, async () => {}, () => 0))
+      const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: now + 3600000, uid: 'u', terminalId: 't' }
+      cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+      await cloud.sendCommands(session, 'sw', [{ code: 'switch_1', value: true }])
+      now += 1000
+      expect(await cloud.deviceStatus(session, 'sw')).toEqual({ switch_1: true })
+      now += 11_000                                              // the entry expires
+      await expect(cloud.deviceStatus(session, 'sw')).rejects.toThrow('missing device')
+    } finally { vi.restoreAllMocks() }
+  })
+  it('confirms from a fresh batch that starts in the same millisecond as the command', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    try {
+      const fetcher = vi.fn(async (url: string) => String(url).includes('/commands')
+        ? { ok: true, json: async () => ({ success: true, result: true }) }
+        : { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: true }] }] }) })
+      const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => 100_000, async () => {}, () => 0))
+      const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: 100_000 + 3_600_000, uid: 'u', terminalId: 't' }
+      cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+      await cloud.sendCommands(session, 'sw', [{ code: 'switch_1', value: true }])
+      expect(await cloud.deviceStatus(session, 'sw')).toEqual({ switch_1: true })
+    } finally { vi.restoreAllMocks() }
+  })
+  it('confirms on the retry through the real cache when the first post-command batch lags', async () => {
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      return { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: statusCalls >= 2 }] }] }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => Date.now(), async () => {}, () => 0))
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    const service = new TuyaService(cloud, {} as TuyaLanClient, vi.fn().mockResolvedValue(new Map()))
+    const homes = [{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }]
+    vi.spyOn(cloud, 'listHomes').mockResolvedValue(homes)
+    cloud.registerHomes(homes)
+    await service.discover(session)
+    expect(await service.setLight('sw', { on: true })).toMatchObject({ on: true, online: true })
+    expect(statusCalls).toBe(2)
+  })
   it('takes online from ha/home/devices even when cached switch status says on', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
       { id: 'one', online: false, status: [{ code: 'switch_led', value: true }] }
@@ -522,7 +620,9 @@ describe('typed light service', () => {
     const service = new TuyaService(cloud as unknown as SmartLifeCloud, { request: vi.fn() } as unknown as TuyaLanClient,
       vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
     await service.restore([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: '', homeId: 'home' }] }], session)
-    expect(await service.setLight('light-1', { on: true, brightness: 50 })).toMatchObject({ online: false })
+    // Cloud accepted the bundle but status still lags after a retry: requested state, flagged unconfirmed (never 'offline').
+    expect(await service.setLight('light-1', { on: true, brightness: 50 })).toMatchObject({ on: true, brightness: 50, online: true, unconfirmed: true })
+    expect(cloud.deviceStatus.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(cloud.sendCommands.mock.calls.map(call => call[2])).toEqual([
       [{ code: 'switch_led', value: true }, { code: 'bright_value_v2', value: 505 }],
       [{ code: 'switch_led', value: true }], [{ code: 'bright_value_v2', value: 505 }]
@@ -596,6 +696,19 @@ describe('typed light service', () => {
     await service.discover(session)
     expect(await service.setLight('light-1', { on: true })).toEqual({ on: false, online: false })
     expect(cloud.sendCommands).toHaveBeenCalledOnce()
+  })
+  it('confirms a cloud command on the second status read when the first one lags', async () => {
+    const cloud = {
+      listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
+        { id: 'light-1', name: 'Lamp', category: 'dj', homeId: 'home' }
+      ] }]),
+      sendCommands: vi.fn().mockResolvedValue(undefined),
+      deviceStatus: vi.fn().mockResolvedValueOnce({ switch_led: false }).mockResolvedValueOnce({ switch_led: true })
+    }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, {} as TuyaLanClient, vi.fn().mockResolvedValue(new Map()))
+    await service.discover(session)
+    expect(await service.setLight('light-1', { on: true })).toMatchObject({ on: true, online: true })
+    expect(cloud.deviceStatus).toHaveBeenCalledTimes(2)
   })
   it('ignores cloud WAN IP and uses a verified TCP probe candidate', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [

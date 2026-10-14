@@ -6,6 +6,8 @@ export interface LightState {
   online: boolean
   viaCloud?: boolean
   stale?: boolean
+  /** The cloud accepted the last command but its status had not caught up yet. */
+  unconfirmed?: boolean
   reason?: 'sem energia ou fora da rede'
 }
 
