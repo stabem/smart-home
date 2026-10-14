@@ -262,6 +262,17 @@ describe('main process setup and control', () => {
       await second
       await vi.advanceTimersByTimeAsync(30000)
       expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // A newer command that gets 2304 OFF must also cancel an older slow POWER_ON loop, even if that loop later reads a stale ON.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const slowOn = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await slowOn
+      lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2304: Command not supported in POWER OFF'))
+      await expect(home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 21 })).resolves.toMatchObject({ ok: false, state: { on: false } })
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      await vi.advanceTimersByTimeAsync(4000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
 

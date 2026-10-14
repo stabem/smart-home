@@ -356,8 +356,7 @@ export class HomeController {
   /** Background confirmation after POWER_ON: reads every 3 s for up to 24 s; only an explicit, final POWER_OFF marks the AC off. */
   private async confirmPowerOnLater(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
-    const generation = (this.confirmGeneration.get(ac.id) ?? 0) + 1
-    this.confirmGeneration.set(ac.id, generation)
+    const generation = this.confirmGeneration.get(ac.id) ?? 0
     const superseded = (): boolean => this.confirmGeneration.get(ac.id) !== generation
     let last: AcState | undefined
     for (let attempt = 0; attempt < 8; attempt++) {
@@ -427,6 +426,8 @@ export class HomeController {
           : command.kind === 'ac.mode' ? { mode: command.mode }
             : command.kind === 'ac.fan' ? { fan: command.fan }
               : { turbo: command.on }
+      // Any newer AC command supersedes a running background confirmation for this AC.
+      this.confirmGeneration.set(ac.id, (this.confirmGeneration.get(ac.id) ?? 0) + 1)
       const deadlineController = patch.on === true ? new AbortController() : undefined
       const deadline = deadlineController?.signal
       const deadlineTimer = deadlineController ? setTimeout(() => deadlineController.abort(), 6000) : undefined
