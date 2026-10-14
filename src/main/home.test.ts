@@ -218,11 +218,11 @@ describe('main process setup and control', () => {
       void pending.then(() => { settled = true })
       expect(settled).toBe(false)
       await vi.advanceTimersByTimeAsync(1)
-      await expect(pending).resolves.toMatchObject({ ok: false, state: { on: false, online: false } })
+      await expect(pending).resolves.toMatchObject({ ok: true, state: { on: true } })
       expect(lg.getAcState).toHaveBeenCalledTimes(1)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
-  it('turns LG 2304 (POWER OFF) into a plain instruction and confirms POWER_ON before reporting success', async () => {
+  it('turns LG 2304 (POWER OFF) into a plain instruction, keeps optimistic ON and confirms in the background', async () => {
     vi.useFakeTimers()
     try {
       const { home, lg } = harness({ homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }] })
@@ -239,9 +239,13 @@ describe('main process setup and control', () => {
       expect(lg.getAcState).toHaveBeenCalledWith('ac-1', expect.any(AbortSignal))
       lg.setAc.mockResolvedValueOnce(undefined)
       lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
-      const failing = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      const slow = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
       await vi.advanceTimersByTimeAsync(6100)
-      await expect(failing).resolves.toMatchObject({ ok: false, state: { on: false }, error: expect.stringMatching(/^O ar não ligou/) })
+      // Not confirmed within the IPC window: stays optimistic ON and keeps confirming in the background.
+      await expect(slow).resolves.toMatchObject({ ok: true, state: { on: true } })
+      await vi.advanceTimersByTimeAsync(25000)
+      const rooms = await home.rooms()
+      expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
 

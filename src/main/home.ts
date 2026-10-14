@@ -349,6 +349,22 @@ export class HomeController {
     this.store.save(this.saved)
   }
 
+  /** Background confirmation after POWER_ON: reads every 3 s for up to 24 s; only an explicit, final POWER_OFF marks the AC off. */
+  private async confirmPowerOnLater(ac: AirConditioner): Promise<void> {
+    if (!this.lg) return
+    let last: AcState | undefined
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      last = await this.lg.getAcState(ac.id).catch(() => undefined) ?? last
+      if (last?.on) { this.authoritativeOff.delete(ac.id); console.info('LG confirm result=on'); return }
+    }
+    if (last && !last.on) {
+      this.authoritativeOff.add(ac.id)
+      ac.state = { ...last, on: false }
+      console.info('LG confirm result=off')
+    } else console.info('LG confirm result=unknown')
+  }
+
   private async acState(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
@@ -420,7 +436,8 @@ export class HomeController {
             })
             state = await read(deadline) ?? state
           }
-          if (!state?.on) errorMessage = 'O ar não ligou. Confira se ele está na tomada e tente de novo.'
+          // LG often needs more than 6 s to report POWER_ON. Keep the optimistic ON and finish confirming in the background.
+          if (!state?.on) { state = { ...(state ?? ac.state), on: true, online: true }; void this.confirmPowerOnLater(ac) }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : ''
