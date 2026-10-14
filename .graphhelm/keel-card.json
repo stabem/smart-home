@@ -1,16 +1,12 @@
 {
-  "promise": "A light or AC press and brightness drag paint in the same frame, keep the latest pending intent, and roll back with a local error after a delayed failure. Room navigation and expansion feel native, remain keyboard accessible, and honor reduced motion.",
+  "promise": "Tuya bulbs use each device's code-to-DP mapping for LAN read and write, with correct v2 and legacy values; an unconfirmed group member cannot turn healthy members off, and failed LAN control tries queued cloud control before failure.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "docs/DESIGN.md",
-    "package.json",
-    "package-lock.json",
-    "src/renderer/App.tsx",
-    "src/renderer/design-proof.mjs",
-    "src/renderer/fixtures/index.ts",
-    "src/renderer/style.css",
-    "tests/interaction.spec.ts",
-    "test-results/design/interaction.webm"
+    "src/main/tuya/cloud.ts",
+    "src/main/tuya/index.ts",
+    "src/main/tuya/tuya.test.ts",
+    "src/main/home.ts",
+    "src/main/home.test.ts"
   ],
-  "proof": "npx playwright test on a free port (1500 ms fixture, same-frame mark <16 ms, rollback, drag, room video and frame samples); node src/renderer/design-proof.mjs (screenshots, axe, focus, idle); sh ci/local-ci.sh; npm run build; inspect interaction.webm"
+  "proof": "npx vitest run src/main/tuya/tuya.test.ts src/main/home.test.ts; sh ci/local-ci.sh"
 }

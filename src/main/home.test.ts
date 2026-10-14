@@ -15,7 +15,7 @@ function harness(initial: SavedSetup | null = null) {
   let saved = initial
   const store = { load: vi.fn(() => saved), save: vi.fn((value: SavedSetup) => { saved = value }) }
   const cloud = { startLogin: vi.fn(async () => ({ token: 'fake-qr', qrUri: 'tuyaSmart--qrLogin?token=fake-qr' })), pollLogin: vi.fn(async () => session) }
-  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async (id: string) => ({ on: id === '', online: true })), setLight: vi.fn(async (id: string) => ({ on: !!id, online: true })) }
+  const tuya = { discover: vi.fn(async () => homes), restore: vi.fn(async () => {}), getState: vi.fn(async (id: string) => ({ on: id === '', online: true })), setLight: vi.fn(async (id: string, patch: Record<string, unknown>) => ({ on: !!id, online: true, ...patch })) }
   const lg = { listAcs: vi.fn(async () => [
     { id: 'ac-1', name: 'Ar Sala de estar', state: { on: false, targetTemperature: 23, online: true } },
     { id: 'ac-2', name: 'Ar Office', state: { on: false, targetTemperature: 23, online: true } },
@@ -77,6 +77,29 @@ describe('main process setup and control', () => {
     tuya.setLight.mockClear()
     await home.rooms()
     expect(tuya.setLight).not.toHaveBeenCalled()
+  })
+  it('does not turn healthy group members off after one member has an unconfirmed off read', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const id = home.groupSetup().groups[0].id
+    await home.command({ kind: 'light.power', deviceId: id, on: true })
+    tuya.getState.mockImplementation(async (lightId: string) => lightId === 'bulb-1'
+      ? { on: false, online: false } : { on: true, online: true })
+    tuya.setLight.mockClear()
+    await home.rooms()
+    expect(tuya.setLight).not.toHaveBeenCalled()
+    tuya.getState.mockImplementation(async (lightId: string) => lightId === 'bulb-1'
+      ? { on: false, online: true, stale: true } : { on: true, online: true })
+    await home.rooms()
+    expect(tuya.setLight).not.toHaveBeenCalled()
+  })
+  it('does not accept an unconfirmed off reply as a successful group on command', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const id = home.groupSetup().groups[0].id
+    tuya.setLight.mockImplementation(async (lightId: string) => lightId === 'bulb-1'
+      ? { on: false, online: true } : { on: true, online: true })
+    await expect(home.command({ kind: 'light.power', deviceId: id, on: true })).rejects.toThrow('Office_1')
+    expect(tuya.setLight.mock.calls.filter(([lightId]) => lightId === 'bulb-1')).toHaveLength(2)
+    expect(tuya.setLight).toHaveBeenCalledWith('bulb-4', { on: true })
   })
 
   it('persists edited track membership and rejects cross-room members', async () => {

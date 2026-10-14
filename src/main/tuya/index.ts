@@ -9,6 +9,24 @@ export { TuyaLanClient, type LanDevice, type TuyaVersion } from './protocol'
 
 export interface LightPatch { on?: boolean; brightness?: number; temperature?: number; color?: string }
 const versions: TuyaVersion[] = ['3.3', '3.4', '3.5']
+const legacy = { switch_led: 1, work_mode: 2, bright_value: 3, temp_value: 4, colour_data: 5 }
+const modern = { switch_led: 20, work_mode: 21, bright_value_v2: 22, temp_value_v2: 23, colour_data_v2: 24 }
+function lightMap(device: SmartLifeDevice, dps?: Dps): Record<string, number> {
+  return { ...(dps?.['20'] !== undefined || device.dpMap?.switch_led === 20 ? modern : legacy), ...device.dpMap }
+}
+function point(map: Record<string, number>, ...codes: string[]): { code: string; dp: number } | undefined {
+  const code = codes.find(value => Number.isInteger(map[value]) && map[value] > 0)
+  return code ? { code, dp: map[code] } : undefined
+}
+function scale(value: number, code: string, encode: boolean): number {
+  const [min, max] = code === 'bright_value_v2' ? [10, 1000] : code === 'bright_value' ? [25, 255]
+    : code === 'temp_value_v2' ? [0, 1000] : [0, 255]
+  return encode ? Math.round(min + Math.max(0, Math.min(100, value)) * (max - min) / 100)
+    : Math.round((value - min) * 100 / (max - min))
+}
+function confirms(state: LightState, patch: LightPatch): boolean {
+  return state.online && !state.stale && Object.entries(patch).every(([key, value]) => state[key as keyof LightState] === value)
+}
 function channel(id: string): { id: string; dp: number } {
   const match = /^(.*)::(\d+)$/.exec(id)
   return match ? { id: match[1], dp: Number(match[2]) } : { id, dp: 1 }
@@ -16,6 +34,7 @@ function channel(id: string): { id: string; dp: number } {
 export class TuyaService {
   private readonly devices = new Map<string, LanDevice & { category: string }>()
   private readonly lastStates = new Map<string, LightState>()
+  private readonly observedMaps = new Map<string, Record<string, number>>()
   private session: SmartLifeSession | null = null
   private homes: SmartLifeHome[] = []
   private addressSink: ((homes: SmartLifeHome[]) => void) | null = null
@@ -39,6 +58,7 @@ export class TuyaService {
   async discover(session: SmartLifeSession): Promise<SmartLifeHome[]> {
     this.session = session
     this.homes = await this.cloud.listHomes(session)
+    this.observedMaps.clear()
     for (const home of this.homes) for (const device of home.devices) device.ip = undefined
     await this.resolveAddresses()
     this.startRefresh()
@@ -49,6 +69,7 @@ export class TuyaService {
   async restore(homes: SmartLifeHome[], session?: SmartLifeSession | null): Promise<void> {
     this.session = session ?? null
     this.homes = homes
+    this.observedMaps.clear()
     this.cloud.registerHomes?.(homes)
     let scrubbed = false
     for (const home of homes) for (const device of home.devices) if (device.ip && !isLanIp(device.ip)) {
@@ -143,9 +164,13 @@ export class TuyaService {
   async getState(id: string): Promise<LightState> {
     const selected = channel(id)
     const device = this.devices.get(selected.id)
+    const cloudDevice = this.homes.flatMap(home => home.devices).find(value => value.id === selected.id)
     if (device) {
       try {
-        const state = this.toState(device.category, await this.requestWithFallback(device), selected.dp)
+        const dps = await this.requestWithFallback(device)
+        const map = cloudDevice?.category === 'dj' ? lightMap(cloudDevice, dps) : undefined
+        if (map) this.observedMaps.set(selected.id, map)
+        const state = this.toState(device.category, dps, selected.dp, map)
         if (state.online) this.lastStates.set(id, state)
         return state
       }
@@ -162,26 +187,38 @@ export class TuyaService {
     const dps: Dps = {}
     const light = cloudDevice.category === 'dj'
     if (!light && !['kg', 'cz'].includes(cloudDevice.category)) throw new Error('Unsupported Tuya light category')
-    if (patch.on !== undefined) dps[String(selected.dp)] = patch.on
+    let map = this.observedMaps.get(selected.id) ?? lightMap(cloudDevice)
+    if (device && light && !cloudDevice.dpMap && !this.observedMaps.has(selected.id)) {
+      try { map = lightMap(cloudDevice, await this.requestWithFallback(device)); this.observedMaps.set(selected.id, map) }
+      catch { /* Use cloud control after the LAN attempt. */ }
+    }
+    if (patch.on !== undefined) dps[String(light ? (point(map, 'switch_led')?.dp ?? selected.dp) : selected.dp)] = patch.on
     if (patch.brightness !== undefined) {
       if (!light) throw new Error('Brightness unsupported by switch')
-      dps['3'] = Math.round(Math.max(0, Math.min(100, patch.brightness)) * 10)
+      const target = point(map, 'bright_value_v2', 'bright_value')
+      if (!target) throw new Error('Brightness DP unavailable')
+      dps[String(target.dp)] = scale(patch.brightness, target.code, true)
     }
     if (patch.temperature !== undefined) {
       if (!light) throw new Error('Temperature unsupported by switch')
-      dps['4'] = Math.round(Math.max(0, Math.min(100, patch.temperature)) * 10)
+      const target = point(map, 'temp_value_v2', 'temp_value')
+      if (!target) throw new Error('Temperature DP unavailable')
+      dps[String(target.dp)] = scale(patch.temperature, target.code, true)
     }
     if (patch.color !== undefined) {
       if (!light) throw new Error('Color unsupported by switch')
-      dps['5'] = encodeHsv(patch.color)
-      dps['2'] = 'colour'
+      const target = point(map, 'colour_data_v2', 'colour_data')
+      if (!target) throw new Error('Color DP unavailable')
+      dps[String(target.dp)] = encodeHsv(patch.color, target.code === 'colour_data')
+      const mode = point(map, 'work_mode')
+      if (mode) dps[String(mode.dp)] = 'colour'
     }
     if (!Object.keys(dps).length) return this.getState(id)
     if (device) {
       try {
         await this.lan.request(device, dps)
         const state = await this.getState(id)
-        if (state.online) return state
+        if (confirms(state, patch)) return state
         throw new Error('LAN set was not confirmed by status')
       }
       catch (error) { this.logFailure(`${selected.id} step=lan-set`, device, error) }
@@ -191,7 +228,7 @@ export class TuyaService {
       const commands = this.cloudCommands(cloudDevice, selected.dp, patch)
       await this.cloud.sendCommands(this.session, selected.id, commands)
       const state = await this.cloudState(selected.id, selected.dp)
-      return state
+      return confirms(state, patch) ? state : { on: false, online: false }
     } catch (error) {
       this.logFailure(`${selected.id} step=cloud-set`, device, error)
       if (error instanceof SmartLifeRateLimitError) throw error
@@ -223,13 +260,26 @@ export class TuyaService {
   }
 
   private cloudCommands(device: SmartLifeDevice, dp: number, patch: LightPatch): Array<{ code: string; value: unknown }> {
-    const supported = new Set(device.cloudCodes ?? [])
+    const supported = new Set([...(device.cloudCodes ?? []), ...Object.keys(device.dpMap ?? {})])
     const choose = (...codes: string[]): string => codes.find(code => supported.has(code)) ?? codes[0]
     const commands: Array<{ code: string; value: unknown }> = []
     if (patch.on !== undefined) commands.push({ code: device.category === 'dj' ? choose('switch_led', 'switch_1') : choose(`switch_${dp}`, 'switch'), value: patch.on })
-    if (patch.brightness !== undefined) commands.push({ code: choose('bright_value_v2', 'bright_value'), value: Math.round(patch.brightness * 10) })
-    if (patch.temperature !== undefined) commands.push({ code: choose('temp_value_v2', 'temp_value'), value: Math.round(patch.temperature * 10) })
-    if (patch.color !== undefined) throw new Error('Cloud color control unsupported')
+    if (patch.brightness !== undefined) {
+      const code = choose('bright_value_v2', 'bright_value')
+      commands.push({ code, value: scale(patch.brightness, code, true) })
+    }
+    if (patch.temperature !== undefined) {
+      const code = choose('temp_value_v2', 'temp_value')
+      commands.push({ code, value: scale(patch.temperature, code, true) })
+    }
+    if (patch.color !== undefined) {
+      const code = choose('colour_data_v2', 'colour_data')
+      const hex = encodeHsv(patch.color)
+      const factor = code === 'colour_data_v2' ? 1 : 255 / 1000
+      commands.push({ code: 'work_mode', value: 'colour' }, { code, value: {
+        h: parseInt(hex.slice(0, 4), 16), s: Math.round(parseInt(hex.slice(4, 8), 16) * factor),
+        v: Math.round(parseInt(hex.slice(8, 12), 16) * factor) } })
+    }
     return commands
   }
 
@@ -244,8 +294,17 @@ export class TuyaService {
       const state: LightState = { on, online: true, viaCloud: true }
       const brightness = status.bright_value_v2 ?? status.bright_value
       const temperature = status.temp_value_v2 ?? status.temp_value
-      if (typeof brightness === 'number') state.brightness = Math.round(brightness / 10)
-      if (typeof temperature === 'number') state.temperature = Math.round(temperature / 10)
+      if (typeof brightness === 'number') state.brightness = scale(brightness, status.bright_value_v2 !== undefined ? 'bright_value_v2' : 'bright_value', false)
+      if (typeof temperature === 'number') state.temperature = scale(temperature, status.temp_value_v2 !== undefined ? 'temp_value_v2' : 'temp_value', false)
+      const colour = status.colour_data_v2 ?? status.colour_data
+      if (colour && typeof colour === 'object' && !Array.isArray(colour)) {
+        const hsv = colour as Record<string, unknown>
+        if (['h', 's', 'v'].every(key => typeof hsv[key] === 'number')) {
+          const factor = status.colour_data_v2 !== undefined ? 1 : 1000 / 255
+          state.color = decodeHsv([Number(hsv.h), Number(hsv.s) * factor, Number(hsv.v) * factor]
+            .map(value => Math.round(value).toString(16).padStart(4, '0')).join(''))
+        }
+      }
       this.lastStates.set(dp === 1 ? id : `${id}::${dp}`, state)
       return state
     } catch (error) {
@@ -270,20 +329,23 @@ export class TuyaService {
     } catch { /* The device stays visible and getState will report offline after retries. */ }
   }
 
-  private toState(category: string, dps: Dps, dp = 1): LightState {
-    const on = dps[String(dp)]
+  private toState(category: string, dps: Dps, dp = 1, map?: Record<string, number>): LightState {
+    const on = dps[String(category === 'dj' ? (point(map ?? legacy, 'switch_led')?.dp ?? dp) : dp)]
     if (typeof on !== 'boolean') return { on: false, online: false }
     const state: LightState = { on, online: true }
     if (category === 'dj') {
-      if (typeof dps['3'] === 'number') state.brightness = Math.round(dps['3'] / 10)
-      if (typeof dps['4'] === 'number') state.temperature = Math.round(dps['4'] / 10)
-      if (typeof dps['5'] === 'string') state.color = decodeHsv(dps['5'])
+      const brightness = point(map ?? legacy, 'bright_value_v2', 'bright_value')
+      const temperature = point(map ?? legacy, 'temp_value_v2', 'temp_value')
+      const color = point(map ?? legacy, 'colour_data_v2', 'colour_data')
+      if (brightness && typeof dps[String(brightness.dp)] === 'number') state.brightness = scale(dps[String(brightness.dp)] as number, brightness.code, false)
+      if (temperature && typeof dps[String(temperature.dp)] === 'number') state.temperature = scale(dps[String(temperature.dp)] as number, temperature.code, false)
+      if (color && typeof dps[String(color.dp)] === 'string') state.color = decodeHsv(dps[String(color.dp)] as string)
     }
     return state
   }
 }
 
-function encodeHsv(color: string): string {
+function encodeHsv(color: string, legacyColor = false): string {
   const match = /^#([0-9a-f]{6})$/i.exec(color)
   if (!match) throw new Error('Color must be #RRGGBB')
   const rgb = [0, 2, 4].map(i => parseInt(match[1].slice(i, i + 2), 16) / 255)
@@ -296,9 +358,12 @@ function encodeHsv(color: string): string {
     hue = (hue * 60 + 360) % 360
   }
   const sat = max ? delta / max : 0
-  return [hue, sat * 1000, max * 1000].map((n, i) => Math.round(n).toString(16).padStart(i === 0 ? 4 : 4, '0')).join('')
+  const hsv = [hue, sat * (legacyColor ? 255 : 1000), max * (legacyColor ? 255 : 1000)]
+    .map((n, i) => Math.round(n).toString(16).padStart(legacyColor && i > 0 ? 2 : 4, '0')).join('')
+  return legacyColor ? match[1].toLowerCase() + hsv : hsv
 }
 function decodeHsv(value: string): string | undefined {
+  if (/^[0-9a-f]{14}$/i.test(value)) return '#' + value.slice(0, 6).toLowerCase()
   if (!/^[0-9a-f]{12}$/i.test(value)) return undefined
   const h = parseInt(value.slice(0, 4), 16) / 60
   const s = parseInt(value.slice(4, 8), 16) / 1000

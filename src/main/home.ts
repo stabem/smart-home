@@ -190,7 +190,7 @@ export class HomeController {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const state = await this.tuya.setLight(id, patch)
-        if (state.online) return state
+        if (state.online && !state.stale && Object.entries(patch).every(([key, value]) => state[key as keyof LightState] === value)) return state
         last = new Error('offline after LAN and cloud control')
       } catch (error) { last = error }
       const message = last instanceof Error ? last.message : 'unknown'
