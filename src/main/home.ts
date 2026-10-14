@@ -115,6 +115,7 @@ function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boo
 }
 
 export class HomeController {
+  private readonly authoritativeOff = new Set<string>()
   private saved: SavedSetup | null
   private draft: SavedSetup | null = null
   private qrToken: string | null = null
@@ -351,6 +352,7 @@ export class HomeController {
   private async acState(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
+    if (this.authoritativeOff.has(ac.id)) ac.state = { ...ac.state, on: false }
   }
 
   async command(command: unknown): Promise<void | { ok: boolean; state: AcState; error?: string }> {
@@ -424,14 +426,21 @@ export class HomeController {
         const message = error instanceof Error ? error.message : ''
         code = /^LG API request failed \(\d{3}\): (2304|2207)(?::|\b)/.exec(message)?.[1] ?? 'other'
         errorMessage = code === '2304' ? 'O ar está desligado. Ligue primeiro.' : 'Ar não respondeu. Tente novamente.'
-        if (code === '2304') ac.state = { ...ac.state, on: false }
+        if (code === '2304') {
+          this.authoritativeOff.add(ac.id)
+          ac.state = { ...ac.state, on: false, online: true }
+          console.info(`LG control result=failed kind=${command.kind} code=2304`)
+          if (deadlineTimer) clearTimeout(deadlineTimer)
+          return { ok: false, state: ac.state, error: errorMessage }
+        }
       }
       if (!state) state = await read(deadline)
       if (!state) {
         state = { ...offlineAc }
         errorMessage ??= 'Ar não respondeu. Tente novamente.'
       }
-      if (code === '2304' || patch.on === true && !!errorMessage) state = { ...state, on: false }
+      if (patch.on === true && !!errorMessage) state = { ...state, on: false }
+      if (patch.on === true && !errorMessage && state.on) this.authoritativeOff.delete(ac.id)
       console.info(`LG control result=${errorMessage ? 'failed' : 'ok'} kind=${command.kind} code=${code}`)
       if (deadlineTimer) clearTimeout(deadlineTimer)
       return { ok: !errorMessage, state, ...(errorMessage ? { error: errorMessage } : {}) }

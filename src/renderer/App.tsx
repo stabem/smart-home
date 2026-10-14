@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from 'motion/react'
 import { Button, Slider, SliderThumb, SliderTrack, Switch, ToggleButton } from 'react-aria-components'
 import type { CSSProperties, ReactNode } from 'react'
@@ -128,6 +128,8 @@ function applyCommand(rooms: Room[], command: DeviceCommand): Room[] {
 export function App({ api }: { api: SmartHomeApi }) {
   const reducedMotion = useReducedMotion()
   const baseRooms = useRef<Room[]>([])
+  const acStateVersions = useRef(new Map<string, number>())
+  const authoritativeOff = useRef(new Set<string>())
   const optimistic = useRef(new Map<string, { command: DeviceCommand; version: number }>())
   const sending = useRef(new Set<string>())
   const serial = useRef(0)
@@ -174,13 +176,23 @@ export function App({ api }: { api: SmartHomeApi }) {
     report()
     return () => { observer.disconnect(); changes.disconnect() }
   }, [api, rooms, selected, reconnecting])
-  const visibleRooms = () => [...optimistic.current.values()].reduce((value, item) => applyCommand(value, item.command), baseRooms.current)
-  async function refresh() { baseRooms.current = await api.getRooms(); setRooms(visibleRooms()); setSetup(await api.getSetupStatus()) }
+  const visibleRooms = useCallback(() => [...optimistic.current.values()].reduce((value, item) => applyCommand(value, item.command), baseRooms.current), [])
+  const refresh = useCallback(async () => {
+    const startedVersions = new Map(acStateVersions.current)
+    const fresh = await api.getRooms()
+    const currentAcs = new Map(baseRooms.current.flatMap(room => room.acs.map(ac => [ac.id, ac.state] as const)))
+    baseRooms.current = fresh.map(room => ({ ...room, acs: room.acs.map(ac =>
+      acStateVersions.current.get(ac.id) !== startedVersions.get(ac.id) && currentAcs.has(ac.id)
+        ? { ...ac, state: currentAcs.get(ac.id)! }
+        : authoritativeOff.current.has(ac.id) ? { ...ac, state: { ...ac.state, on: false } } : ac) }))
+    setRooms(visibleRooms())
+    setSetup(await api.getSetupStatus())
+  }, [api, visibleRooms])
   useEffect(() => {
-    void api.getRooms().then(async rooms => { baseRooms.current = rooms; setRooms(rooms); setSetup(await api.getSetupStatus()) }).catch(() => setRooms([]))
+    void refresh().catch(() => setRooms([]))
     void api.getSetupStatus().then(setSetup).catch(() => setError('Não foi possível abrir a configuração salva.'))
     void api.getLaunchAtLogin().then(setLogin).catch(() => setLogin(false))
-  }, [api])
+  }, [api, refresh])
   function command(value: DeviceCommand) {
     const key = `${value.deviceId}:${value.kind}`
     const version = ++serial.current
@@ -202,7 +214,10 @@ export function App({ api }: { api: SmartHomeApi }) {
         try {
           const result = await api.sendCommand(next.command)
           if (result) {
+            if (!result.ok && result.error === 'O ar está desligado. Ligue primeiro.') authoritativeOff.current.add(next.command.deviceId)
+            if (result.ok && next.command.kind === 'ac.power' && next.command.on && result.state.on) authoritativeOff.current.delete(next.command.deviceId)
             baseRooms.current = baseRooms.current.map(room => ({ ...room, acs: room.acs.map(ac => ac.id === next.command.deviceId ? { ...ac, state: result.state } : ac) }))
+            acStateVersions.current.set(next.command.deviceId, (acStateVersions.current.get(next.command.deviceId) ?? 0) + 1)
           } else baseRooms.current = applyCommand(baseRooms.current, next.command)
           if (result && !result.ok) throw new Error(result.error)
           if (optimistic.current.get(key)?.version === next.version) optimistic.current.delete(key)
@@ -216,7 +231,7 @@ export function App({ api }: { api: SmartHomeApi }) {
         setPending([...optimistic.current.keys()])
       }
       sending.current.delete(key)
-      if (!value.kind.startsWith('ac.')) void refresh().catch(() => undefined)
+      void refresh().catch(() => undefined)
     })()
   }
   useLayoutEffect(() => { if (lastIntent.current) { performance.mark(`${lastIntent.current}:paint-ready`); lastIntent.current = null } }, [rooms])

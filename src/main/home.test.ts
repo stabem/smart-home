@@ -229,14 +229,13 @@ describe('main process setup and control', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.spyOn(console, 'info').mockImplementation(() => {})
       lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2304: Command not supported in POWER OFF'))
-      lg.getAcState.mockResolvedValueOnce({ on: true, targetTemperature: 23, online: true })
       await expect(home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 20 })).resolves.toMatchObject({ ok: false, error: 'O ar está desligado. Ligue primeiro.', state: { on: false } })
       lg.setAc.mockResolvedValueOnce(undefined)
       lg.getAcState.mockResolvedValueOnce({ on: false, targetTemperature: 23, online: true }).mockResolvedValueOnce({ on: true, targetTemperature: 23, online: true })
       const pending = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
       await vi.advanceTimersByTimeAsync(4100)
       await expect(pending).resolves.toMatchObject({ ok: true, state: { on: true } })
-      expect(lg.getAcState).toHaveBeenCalledTimes(3)
+      expect(lg.getAcState).toHaveBeenCalledTimes(2)
       expect(lg.getAcState).toHaveBeenCalledWith('ac-1', expect.any(AbortSignal))
       lg.setAc.mockResolvedValueOnce(undefined)
       lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
@@ -244,6 +243,20 @@ describe('main process setup and control', () => {
       await vi.advanceTimersByTimeAsync(6100)
       await expect(failing).resolves.toMatchObject({ ok: false, state: { on: false }, error: expect.stringMatching(/^O ar não ligou/) })
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+  })
+
+  it('returns 2304 OFF before a delayed state read and keeps a stale ON read off', async () => {
+    const { home, lg } = harness({ homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }] })
+    lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2304: Command not supported in POWER OFF'))
+    let finishRead!: (state: { on: boolean; targetTemperature: number; online: boolean }) => void
+    lg.getAcState.mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve }))
+    const result = await home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 20 })
+    expect(result).toMatchObject({ ok: false, state: { on: false } })
+    expect(lg.getAcState).not.toHaveBeenCalled()
+    const rooms = home.rooms()
+    await vi.waitFor(() => expect(lg.getAcState).toHaveBeenCalledOnce())
+    finishRead({ on: true, targetTemperature: 23, online: true })
+    expect((await rooms).flatMap(room => room.acs).find(ac => ac.id === 'ac-1')?.state.on).toBe(false)
   })
 
   it('keeps every unmatched AC in Sem cômodo and saves the chosen room mapping', async () => {
