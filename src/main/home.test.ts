@@ -218,11 +218,11 @@ describe('main process setup and control', () => {
       void pending.then(() => { settled = true })
       expect(settled).toBe(false)
       await vi.advanceTimersByTimeAsync(1)
-      await expect(pending).resolves.toMatchObject({ ok: false, state: { on: false, online: false } })
+      await expect(pending).resolves.toMatchObject({ ok: true, state: { on: true } })
       expect(lg.getAcState).toHaveBeenCalledTimes(1)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
-  it('turns LG 2304 (POWER OFF) into a plain instruction and confirms POWER_ON before reporting success', async () => {
+  it('turns LG 2304 (POWER OFF) into a plain instruction, keeps optimistic ON and confirms in the background', async () => {
     vi.useFakeTimers()
     try {
       const { home, lg } = harness({ homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }] })
@@ -239,9 +239,66 @@ describe('main process setup and control', () => {
       expect(lg.getAcState).toHaveBeenCalledWith('ac-1', expect.any(AbortSignal))
       lg.setAc.mockResolvedValueOnce(undefined)
       lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
-      const failing = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      const slow = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
       await vi.advanceTimersByTimeAsync(6100)
-      await expect(failing).resolves.toMatchObject({ ok: false, state: { on: false }, error: expect.stringMatching(/^O ar não ligou/) })
+      // Not confirmed within the IPC window: stays optimistic ON and keeps confirming in the background.
+      await expect(slow).resolves.toMatchObject({ ok: true, state: { on: true } })
+      // An immediate refresh while LG still lags (reads OFF) must keep the optimistic ON.
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // Slow reads (4 s each) stretch the loop to ~56 s; the optimistic ON must hold until the loop itself ends.
+      lg.getAcState.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ on: false, targetTemperature: 23, online: true }), 4000)))
+      await vi.advanceTimersByTimeAsync(40000)
+      const midway = home.rooms()
+      await vi.advanceTimersByTimeAsync(4000)
+      expect((await midway).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      await vi.advanceTimersByTimeAsync(30000)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      // A final read that FAILS must not reuse an older OFF: no off marker, state stays whatever the next read says.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      let reads = 0
+      lg.getAcState.mockImplementation(async () => { reads++; if (reads === 1) return { on: false, targetTemperature: 23, online: true }; throw new Error('LG API request failed (500)') })
+      const flaky = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await flaky
+      await vi.advanceTimersByTimeAsync(30000)
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // Never-ON: every read explicitly OFF → after the background window the AC shows OFF.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const neverOn = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await neverOn
+      await vi.advanceTimersByTimeAsync(30000)
+      const rooms = await home.rooms()
+      expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
+      // An authoritative ON read (turned on elsewhere) clears the off marker once the stale window has passed.
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      await vi.advanceTimersByTimeAsync(16000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // A superseded background loop must not mark the AC off after a newer press confirmed ON.
+      lg.setAc.mockResolvedValue(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const first = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await first
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      const second = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(2100)
+      await second
+      await vi.advanceTimersByTimeAsync(30000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // A newer command that gets 2304 OFF must also cancel an older slow POWER_ON loop, even if that loop later reads a stale ON.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const slowOn = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await slowOn
+      lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2304: Command not supported in POWER OFF'))
+      await expect(home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 21 })).resolves.toMatchObject({ ok: false, state: { on: false } })
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      await vi.advanceTimersByTimeAsync(4000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
 
