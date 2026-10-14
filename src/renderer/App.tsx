@@ -11,8 +11,9 @@ import bulbIcon from './assets/icons/light-bulb.svg?url'
 import airIcon from './assets/icons/snow-flake.svg?url'
 import settingsIcon from './assets/icons/settings.svg?url'
 import backIcon from './assets/icons/arrow-left.svg?url'
-import { Bathroom, Bed, Closet, Cloud, Cutlery, HomeSimpleDoor, Laptop, PlugTypeC, SmallLamp, Sofa, Table, WashingMachine } from 'iconoir-react/regular'
+import { Bathroom, Bed, Closet, Cloud, Cutlery, HomeSimpleDoor, Laptop, SmallLamp, Sofa, Table, WashingMachine } from 'iconoir-react/regular'
 import { roomIcon } from './roomIcons'
+import { startDiscoveryOrbit } from './discovery-orbit'
 
 const roomGlyphs = { sofa: Sofa, cutlery: Cutlery, table: Table, bed: Bed, laptop: Laptop, bath: Bathroom, closet: Closet, washer: WashingMachine, door: HomeSimpleDoor, lamp: SmallLamp }
 
@@ -36,6 +37,44 @@ function Icon({ src, className = '' }: { src: string; className?: string }) {
   return <img className={`lineIcon ${className}`} src={src} alt="" aria-hidden="true" />
 }
 
+const ease = [0.22, 1, 0.36, 1] as const
+const waitingCopy = ['Ainda esperando a lâmpada…', 'A nuvem está lenta hoje…', 'Quase lá…']
+const discoveryCopy = ['Entrando no Smart Life', 'Procurando na sua rede', 'Perguntando à nuvem', 'Organizando os cômodos']
+
+function PendingCopy({ pending, normal }: { pending: boolean; normal: string }) {
+  const reducedMotion = useReducedMotion()
+  const [step, setStep] = useState(-1)
+  useEffect(() => {
+    if (!pending) { setStep(-1); return }
+    let rotate = 0
+    const start = window.setTimeout(() => {
+      setStep(0)
+      rotate = window.setInterval(() => setStep(current => (current + 1) % waitingCopy.length), 3500)
+    }, 3000)
+    return () => { clearTimeout(start); clearInterval(rotate) }
+  }, [pending])
+  const value = step < 0 ? normal : waitingCopy[step]
+  return <AnimatePresence initial={false} mode="wait"><motion.span key={value} initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? undefined : { opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0 : .5, ease }}>{value}</motion.span></AnimatePresence>
+}
+
+function DiscoveryStage({ active, ready, reducedMotion }: { active: boolean; ready: boolean; reducedMotion: boolean | null }) {
+  const [phase, setPhase] = useState(0)
+  const orbit = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!active) { setPhase(0); return }
+    const timers = [1, 2, 3].map(index => window.setTimeout(() => setPhase(index), index * 1200))
+    return () => timers.forEach(clearTimeout)
+  }, [active])
+  useEffect(() => {
+    return startDiscoveryOrbit(orbit.current, active, !!reducedMotion)
+  }, [active, reducedMotion])
+  if (!active) return null
+  return <div className="discoveryStage" aria-label="Buscando dispositivos">
+    <div className="discoveryOrbit" aria-hidden="true"><div className="discoveryRing"/><div className="discoveryRing inner"/><div className="discoveryChips" ref={orbit}>{['Entrada', 'Cozinha', 'Sala de estar', 'Office', 'Quarto', 'Banheiro'].map((name, index) => <span key={name} className={`discoveryChip ${ready && phase >= 2 && index <= phase + 2 ? 'seen' : ''}`} style={{ '--chip-index': index, left: Math.cos(index * Math.PI / 3) * 124, top: Math.sin(index * Math.PI / 3) * 72 } as CSSProperties}><RoomGlyph name={name}/></span>)}</div><div className="discoveryCore"><HomeSimpleDoor aria-hidden="true"/><span>Casa</span></div></div>
+    <div className="discoveryStatus"><AnimatePresence mode="wait"><motion.p key={phase} role="status" initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={reducedMotion ? undefined : { opacity: 0, y: -3 }} transition={{ duration: reducedMotion ? 0 : .5, ease }}>{discoveryCopy[phase]}</motion.p></AnimatePresence><div className="discoverySteps" aria-hidden="true">{discoveryCopy.map((_, index) => <i key={index} className={index < phase ? 'done' : index === phase ? 'now' : ''}/>)}</div></div>
+  </div>
+}
+
 function PresenceScreen({ children, className, direction, reducedMotion }: { children: ReactNode; className: string; direction: number; reducedMotion: boolean | null }) {
   const present = useIsPresent()
   const surface = useRef<HTMLElement>(null)
@@ -43,7 +82,7 @@ function PresenceScreen({ children, className, direction, reducedMotion }: { chi
     initial={reducedMotion ? false : { x: direction, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={reducedMotion ? undefined : { x: -direction, opacity: 0, transition: { duration: .08 } }}
     onAnimationStart={() => { if (surface.current) surface.current.style.willChange = 'transform' }}
     onAnimationComplete={() => { if (surface.current) surface.current.style.willChange = 'auto' }}
-    transition={{ duration: reducedMotion ? 0 : .2, ease: [0.18, 0.82, 0.28, 1] }}>{children}</motion.main>
+    transition={{ duration: reducedMotion ? 0 : .5, ease }}>{children}</motion.main>
 }
 
 export function updatedLabel(value?: string, now = Date.now()): string {
@@ -107,6 +146,8 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [editNames, setEditNames] = useState<Record<string, string>>({})
   const [qr, setQr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [discovering, setDiscovering] = useState(false)
+  const [discoveryReady, setDiscoveryReady] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [reconnecting, setReconnecting] = useState(false)
   const [login, setLogin] = useState(false)
@@ -115,6 +156,13 @@ export function App({ api }: { api: SmartHomeApi }) {
   const [error, setError] = useState('')
   const [userCode, setUserCode] = useState('')
   const [acRoomIds, setAcRoomIds] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!discovering && !found) return
+    const timer = window.setTimeout(() => {
+      document.querySelector<HTMLElement>(discovering ? '.discoveryStage' : '.foundDevices')?.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth', block: 'center' })
+    }, 80)
+    return () => clearTimeout(timer)
+  }, [discovering, found, reducedMotion])
   useLayoutEffect(() => {
     if (!api.fitWindow) return
     const home = document.querySelector<HTMLElement>('.homeScreen')
@@ -179,14 +227,14 @@ export function App({ api }: { api: SmartHomeApi }) {
     catch { setError('Não foi possível gerar o QR. Confira o User Code e a conexão.') }
   }
   async function search() {
-    setBusy(true); setError('')
-    try { const devices = await api.discoverDevices(); setFound(devices); setAcRoomIds(Object.fromEntries(devices.flatMap(room => [...room.acs, ...room.lights].map(device => [device.id, room.id])))); setGroups(devices.flatMap(room => {
+    setBusy(true); setDiscovering(true); setDiscoveryReady(false); setFound(null); setError('')
+    try { const [devices] = await Promise.all([api.discoverDevices().then(value => { setDiscoveryReady(true); return value }), new Promise(resolve => setTimeout(resolve, reducedMotion ? 0 : 5400))]); setFound(devices); setAcRoomIds(Object.fromEntries(devices.flatMap(room => [...room.acs, ...room.lights].map(device => [device.id, room.id])))); setGroups(devices.flatMap(room => {
       const bases = new Map<string, string[]>()
       room.lights.forEach(light => { const match = /^(.*?)_\d+$/.exec(light.name); if (match) bases.set(match[1], [...(bases.get(match[1]) ?? []), light.id]) })
       return [...bases].filter(([, ids]) => ids.length > 1).map(([base, ids]) => ({ id: `group:${room.id}:${base}`, roomId: room.id, name: base === room.name ? `Trilho do ${room.name}` : `${base} (trilho)`, memberIds: ids }))
     })) }
     catch { setError('A busca falhou ou o QR ainda não foi lido. Tente novamente.') }
-    finally { setBusy(false) }
+    finally { setBusy(false); setDiscovering(false) }
   }
   async function save() {
     setBusy(true); setError('')
@@ -206,9 +254,9 @@ export function App({ api }: { api: SmartHomeApi }) {
     } catch { setError('Não foi possível abrir a edição da casa.') }
   }
   async function searchAgain() {
-    setBusy(true); setError('')
+    setBusy(true); setDiscovering(true); setDiscoveryReady(false); setError('')
     try {
-      await api.discoverDevices()
+      await Promise.all([api.discoverDevices().then(() => setDiscoveryReady(true)), new Promise(resolve => setTimeout(resolve, reducedMotion ? 0 : 5400))])
       const data = await api.getGroupSetup()
       setEditRooms(data.rooms)
       const known = new Set(data.rooms.flatMap(room => [...room.lights, ...room.acs].map(device => device.id)))
@@ -216,7 +264,7 @@ export function App({ api }: { api: SmartHomeApi }) {
       setEditNames(current => ({ ...Object.fromEntries(data.rooms.flatMap(room => room.lights.map(light => [light.id, light.name]))), ...Object.fromEntries(Object.entries(current).filter(([id]) => known.has(id))) }))
       setGroups(data.groups)
     } catch { setError('A busca falhou. Tente novamente.') }
-    finally { setBusy(false) }
+    finally { setBusy(false); setDiscovering(false) }
   }
   async function saveEdit() {
     setBusy(true); setError('')
@@ -225,15 +273,15 @@ export function App({ api }: { api: SmartHomeApi }) {
     finally { setBusy(false) }
   }
   async function finishReconnect() {
-    setBusy(true); setError('')
+    setBusy(true); setDiscovering(true); setDiscoveryReady(false); setError('')
     try {
-      await api.reconnectSmartLife()
+      await Promise.all([api.reconnectSmartLife().then(() => setDiscoveryReady(true)), new Promise(resolve => setTimeout(resolve, reducedMotion ? 0 : 4200))])
       setSetup(await api.getSetupStatus())
       await refresh()
       setReconnecting(false)
       setQr('')
     } catch { setError('Leia o QR no Smart Life e tente novamente.') }
-    finally { setBusy(false) }
+    finally { setBusy(false); setDiscovering(false) }
   }
   const alert = error && <p role="alert" className="error">{error}</p>
   if (!rooms || !setup) return <main className="shell"><p role="status">Carregando...</p>{alert}</main>
@@ -249,9 +297,9 @@ export function App({ api }: { api: SmartHomeApi }) {
       <p className="help">Escaneie o QR com o app Smart Life.</p>
       <button className="secondaryButton" onClick={() => void beginLogin()}>Gerar QR Smart Life</button>
       {qr && <img className="qr" src={qr} alt="QR Smart Life" />}
-      <button className="primaryButton" disabled={busy} onClick={() => void search()}><Motion src={scanMotion} active={busy} className="buttonMotion" />Buscar dispositivos</button>
+      <button className="primaryButton" disabled={busy} onClick={() => void search()}><Motion src={scanMotion} active={busy && !discovering} className="buttonMotion" />Buscar dispositivos</button>
     </section>
-    {found && <section className="foundDevices"><h2>Dispositivos encontrados</h2>
+    <AnimatePresence mode="wait">{discovering ? <motion.div key="discovery" exit={reducedMotion ? undefined : { opacity: 0, scale: .96 }} transition={{ duration: reducedMotion ? 0 : .35 }}><DiscoveryStage active ready={discoveryReady} reducedMotion={reducedMotion}/></motion.div> : found && <motion.section key="found" className="foundDevices" initial={reducedMotion ? false : { opacity: 0, y: 16, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .6, ease }}><h2>Dispositivos encontrados</h2>
       <ul aria-label="Dispositivos encontrados">{found.map(room => <li key={room.id}><strong>{room.name}</strong><ul>{[...room.lights, ...room.acs].map(device => <li key={device.id}><label>{device.name} — Cômodo<select aria-label={`Cômodo de ${device.name}`} value={acRoomIds[device.id] || room.id} onChange={event => {
         const nextRoom = event.target.value
         setAcRoomIds(current => ({ ...current, [device.id]: nextRoom }))
@@ -265,7 +313,7 @@ export function App({ api }: { api: SmartHomeApi }) {
       }}>{found.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></li>)}</ul></li>)}</ul>
       <GroupEditor rooms={found.map(room => ({ ...room, lights: found.flatMap(source => source.lights.filter(light => (acRoomIds[light.id] || source.id) === room.id)) }))} groups={groups} onChange={setGroups} />
       <button className="primaryButton" disabled={busy || !found.length} onClick={() => void save()}>Salvar</button>
-    </section>}
+    </motion.section>}</AnimatePresence>
     {alert}
   </main>
   if (editing) return <main className="shell editScreen">
@@ -274,8 +322,9 @@ export function App({ api }: { api: SmartHomeApi }) {
       <section className="editModule"><h2>Conexões</h2><button className="secondaryButton" onClick={() => setReconnecting(!reconnecting)}>Reconectar Smart Life</button>
         {reconnecting && <div className="reconnectFlow"><label>Smart Life User Code<input autoComplete="off" value={userCode} onChange={event => setUserCode(event.target.value)} /></label><button className="secondaryButton" disabled={busy} onClick={() => void beginLogin()}>Gerar QR Smart Life</button>{qr && <><img className="qr" src={qr} alt="QR Smart Life" /><button className="primaryButton" disabled={busy} onClick={() => void finishReconnect()}>Concluir reconexão</button></>}</div>}
         <button className="secondaryButton" disabled={busy} onClick={() => void searchAgain()}>Buscar dispositivos</button>
+        <AnimatePresence>{discovering && <motion.div exit={reducedMotion ? undefined : { opacity: 0, scale: .96 }} transition={{ duration: reducedMotion ? 0 : .35 }}><DiscoveryStage active ready={discoveryReady} reducedMotion={reducedMotion}/></motion.div>}</AnimatePresence>
       </section>
-      <section className="editModule"><h2>Luzes e cômodos</h2>{editRooms.map(room => <div className="editRoom" key={room.id}><h3>{room.name}</h3>{[...room.lights, ...room.acs].map(device => <div className="editDevice" key={device.id}>{room.lights.some(light => light.id === device.id) && <label>Nome de {device.name}<input value={editNames[device.id] ?? device.name} onChange={event => setEditNames(current => ({ ...current, [device.id]: event.target.value }))} /></label>}<label>Cômodo de {device.name}<select value={editAssignments[device.id] ?? room.id} onChange={event => {
+      {!discovering && <motion.section className="editModule" initial={reducedMotion ? false : { opacity: 0, y: 16, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .6, delay: discoveryReady ? .35 : 0, ease }}><h2>Luzes e cômodos</h2>{editRooms.map(room => <div className="editRoom" key={room.id}><h3>{room.name}</h3>{[...room.lights, ...room.acs].map(device => <div className="editDevice" key={device.id}>{room.lights.some(light => light.id === device.id) && <label>Nome de {device.name}<input value={editNames[device.id] ?? device.name} onChange={event => setEditNames(current => ({ ...current, [device.id]: event.target.value }))} /></label>}<label>Cômodo de {device.name}<select value={editAssignments[device.id] ?? room.id} onChange={event => {
           const nextRoom = event.target.value
           setEditAssignments(current => ({ ...current, [device.id]: nextRoom }))
           if (nextRoom !== room.id) setGroups(current => current.flatMap(group => {
@@ -283,7 +332,7 @@ export function App({ api }: { api: SmartHomeApi }) {
             const memberIds = group.memberIds.filter(id => id !== device.id)
             return memberIds.length >= 2 ? [{ ...group, memberIds }] : []
           }))
-        }}>{editRooms.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></div>)}</div>)}</section>
+        }}>{editRooms.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label></div>)}</div>)}</motion.section>}
       <section className="editModule"><GroupEditor rooms={editRooms.map(room => ({ ...room, lights: editRooms.flatMap(source => source.lights.filter(light => (editAssignments[light.id] ?? source.id) === room.id)) }))} groups={groups} onChange={setGroups} /></section>
       <section className="editModule editPrefs"><label><input type="checkbox" checked={login} onChange={event => { const enabled = event.target.checked; void api.setLaunchAtLogin(enabled).then(() => setLogin(enabled)) }} /> Iniciar com o Windows</label><label><input type="checkbox" checked={setup.syncGuard !== false} onChange={event => { const enabled = event.target.checked; void api.setSyncGuard(enabled).then(refresh) }} /> Manter grupos sincronizados</label></section>
       {alert}<button className="primaryButton editSave" disabled={busy} onClick={() => void saveEdit()}>Salvar</button>
@@ -293,10 +342,10 @@ export function App({ api }: { api: SmartHomeApi }) {
   const lightsOn = rooms.flatMap(item => item.lights).filter(light => light.state.online && light.state.on).length
   return <div className="viewStage"><AnimatePresence initial={false} mode="wait">{room ? <PresenceScreen key={room.id} className="shell roomScreen" direction={20} reducedMotion={reducedMotion}>
     <header className="topbar roomTopbar"><button className="back" onClick={() => { setSelected(null); setColorFor(null) }}><Icon src={backIcon} /> <span>Voltar</span></button></header>
-    <div className="roomTitle"><h1>{room.name}</h1></div>
+    <motion.div className="roomTitle" initial={reducedMotion ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: reducedMotion ? 0 : .5, ease }}><h1>{room.name}</h1></motion.div>
     <div className="roomControls">
-      {room.lights.map(light => <motion.section layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className={`devicePanel ${!light.state.online || light.state.reason ? 'unavailable' : ''}`} key={light.id}>
-        <div className="deviceHead"><Switch className="lightSwitch" aria-label={light.name} isSelected={light.state.online && light.state.on} isDisabled={!light.state.online || light.state.stale} onChange={on => command({ kind: 'light.power', deviceId: light.id, on })}><motion.img className="lineIcon lampSymbol" src={bulbIcon} alt="" aria-hidden="true" animate={{ scale: reducedMotion ? 1 : light.state.on ? 1.12 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 32 }} /></Switch><div className="deviceText"><strong>{light.name}</strong><small>{light.state.reason ? <><PlugTypeC className="statusGlyph" aria-hidden="true" />Sem energia</> : light.state.stale ? 'Sem atualização' : !light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} {light.state.viaCloud && <Cloud className="statusGlyph cloudGlyph" aria-label="Via nuvem" />}</small></div>{isPending(light.id) && <span className="controlPending" role="status" aria-label="Enviando comando" />}</div>
+      {room.lights.map((light, index) => <motion.section layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .5, delay: reducedMotion ? 0 : index * .08, ease }} className={`devicePanel ${!light.state.online || light.state.reason ? 'unavailable' : ''} ${light.memberIds && light.state.on ? 'groupOn' : ''}`} key={light.id}>
+        <div className="deviceHead"><Switch className={`lightSwitch ${isPending(light.id) ? 'isPending' : ''}`} aria-label={light.name} isSelected={light.state.online && light.state.on} isDisabled={!light.state.online || light.state.stale} onChange={on => command({ kind: 'light.power', deviceId: light.id, on })}><motion.img className="lineIcon lampSymbol" src={bulbIcon} alt="" aria-hidden="true" animate={{ scale: reducedMotion ? 1 : light.state.on ? [1, 1.08, 1] : 1 }} transition={{ duration: reducedMotion ? 0 : .38, ease }} /></Switch>{isPending(light.id) && <span className="pendingRing" role="status" aria-label="Enviando comando" />}<div className="deviceText"><strong>{light.name}</strong><small><PendingCopy pending={isPending(light.id)} normal={light.state.reason ? 'Sem energia' : light.state.stale ? 'Sem atualização' : !light.state.online ? 'Offline' : light.memberIds ? `${light.memberIds.length} lâmpadas` : light.state.on ? 'Ligada' : 'Desligada'} /> {light.state.viaCloud && <Cloud className="statusGlyph cloudGlyph" aria-label="Via nuvem" />}</small></div></div>
         {controlError[light.id] && <p className="controlError" role="alert">{controlError[light.id]}</p>}
         {!!light.partialFailure?.length && <p className="groupError" role="alert">{light.state.reason ? 'Sem energia' : 'Falha em'}: {light.partialFailure.join(', ')}</p>}
         {!light.switchOnly && light.state.online && !light.state.reason && <div className="rangeLabel"><Slider className="brightnessSlider" aria-label="Brilho" minValue={1} maxValue={100} value={light.state.brightness ?? 100} isDisabled={!light.state.online || light.state.stale} onChangeEnd={() => setDragging(null)} onChange={brightness => command({ kind: 'light.brightness', deviceId: light.id, brightness: Number(brightness) })}><SliderTrack className="sliderTrack" onPointerDown={() => setDragging(light.id)} onPointerUp={() => setDragging(null)} style={{ '--fill': `${light.state.brightness ?? 100}%` } as CSSProperties}><span className="sliderIcon" aria-hidden="true">☀</span><span className="sliderValue" aria-hidden="true">{light.state.brightness ?? 100}%</span><SliderThumb className="ghostThumb" />{dragging === light.id && <span className="valueBubble">{light.state.brightness ?? 100}%</span>}</SliderTrack></Slider></div>}
@@ -308,7 +357,7 @@ export function App({ api }: { api: SmartHomeApi }) {
           {light.state.color === undefined && light.state.temperature === undefined && <p className="help" role="status">Controle de cor ainda não disponível para este dispositivo.</p>}
         </motion.div>}</AnimatePresence>
       </motion.section>)}
-      {room.acs.map(ac => <motion.section layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className="acPanel" key={ac.id}>
+      {room.acs.map((ac, index) => <motion.section layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .5, delay: reducedMotion ? 0 : (room.lights.length + index) * .08, ease }} className="acPanel" key={ac.id}>
         <div className="deviceHead acHead"><span className={`deviceIcon acIcon ${ac.state.on ? 'active' : ''}`} aria-hidden="true"><Icon src={airIcon} /></span><strong>{ac.name}</strong><button className={`acPower ${ac.state.on ? 'active' : ''} ${isPending(ac.id) ? 'isPending' : ''}`} aria-label={ac.state.on ? 'Desligar ar' : 'Ligar ar'} disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.power', deviceId: ac.id, on: !ac.state.on })}><span aria-hidden="true">⏻</span></button></div>
         <Motion src={airMotion} active={ac.state.on} className="airMotion" />
         <div className="acReading"><span className="ambient">Ambiente {ac.state.currentTemperature ?? '—'}°</span><div className="temperature"><Button aria-label="Diminuir" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.max(16, ac.state.targetTemperature - 1) })}>−</Button><strong>{ac.state.targetTemperature}°</strong><Button aria-label="Aumentar" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.min(30, ac.state.targetTemperature + 1) })}>+</Button></div></div>
@@ -330,6 +379,7 @@ export function App({ api }: { api: SmartHomeApi }) {
       <label>Smart Life User Code<input type="text" aria-label="Smart Life User Code" autoComplete="off" value={userCode} onChange={event => setUserCode(event.target.value)} placeholder={setup.smartLifeUserCodeConfigured ? 'Já configurado' : 'Digite seu User Code'} /></label>
       <button type="button" className="secondaryButton" disabled={busy} onClick={() => void beginLogin()}>Gerar QR Smart Life</button>
       {qr && <><img className="qr" src={qr} alt="QR Smart Life" /><p className="help">Escaneie o QR com o app Smart Life.</p><button type="button" className="primaryButton" disabled={busy} onClick={() => void finishReconnect()}>Concluir reconexão</button></>}
+      {discovering && <DiscoveryStage active ready={discoveryReady} reducedMotion={reducedMotion}/>}
     </section>}
     <section className="roomListSection"><div className="sectionHeading"><h2>Cômodos</h2>{lightsOn > 0 && <button className="allOff" onClick={() => void turnOffAll()}>Apagar tudo</button>}</div><ul aria-label="Cômodos" className={`rooms ${rooms.length > 10 ? 'manyRooms' : rooms.length > 8 ? 'tenRooms' : ''}`}>{rooms.map(item => {
       const stale = item.lights.some(light => light.state.stale)
@@ -338,12 +388,11 @@ export function App({ api }: { api: SmartHomeApi }) {
       const ac = item.acs[0]
       const lit = item.lights.filter(light => light.state.on).length
       const status = item.lights.some(light => light.state.reason) ? 'Sem energia' : stale ? 'Sem atualização' : !online ? 'Offline' : ac?.state.on ? `Ar ${ac.state.targetTemperature}°` : lit ? `${lit} ${lit === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Luzes apagadas'
-      return <motion.li layout={!reducedMotion} transition={{ type: "spring", stiffness: 400, damping: 32, duration: reducedMotion ? 0 : undefined }} className={`roomTile ${lit ? 'isLit' : ''} ${ac?.state.on ? 'isCool' : ''}`} key={item.id}>
-        <ToggleButton className="roomLights lightSwitch" aria-label={`Luzes ${item.name}`} isSelected={on} isDisabled={!item.lights.length || !online} onChange={() => item.lights.forEach(light => command({ kind: 'light.power', deviceId: light.id, on: !on }))}><motion.span className="roomGlyphWrap" animate={{ scale: reducedMotion ? 1 : on ? [1, 1.08, 1] : 1 }} transition={{ duration: reducedMotion ? 0 : .38, type: 'tween' }}><RoomGlyph name={item.name} /></motion.span></ToggleButton>
+      return <motion.li layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .5, delay: reducedMotion ? 0 : rooms.indexOf(item) * .06, ease }} className={`roomTile ${lit ? 'isLit' : ''} ${ac?.state.on ? 'isCool' : ''}`} key={item.id}>
+        <ToggleButton className={`roomLights lightSwitch ${item.lights.some(light => isPending(light.id)) ? 'isPending' : ''}`} aria-label={`Luzes ${item.name}`} isSelected={on} isDisabled={!item.lights.length || !online} onChange={() => item.lights.forEach(light => command({ kind: 'light.power', deviceId: light.id, on: !on }))}><motion.span className="roomGlyphWrap" animate={{ scale: reducedMotion ? 1 : on ? [1, 1.08, 1] : 1 }} transition={{ duration: reducedMotion ? 0 : .38, ease }}><RoomGlyph name={item.name} /></motion.span></ToggleButton>
         {ac && <strong className="tileTemperature">{ac.state.currentTemperature ?? ac.state.targetTemperature}°</strong>}
-        <button className="roomName" aria-label={`Abrir ${item.name}`} onClick={() => setSelected(item.id)}><span className="tileName">{item.name}</span><small><AnimatePresence initial={false} mode="wait"><motion.span key={status} initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={reducedMotion ? undefined : { opacity: 0 }} transition={{ duration: reducedMotion ? 0 : on ? .2 : .12 }}>{status}</motion.span></AnimatePresence>{online && item.lights.some(light => light.state.viaCloud) && <Cloud className="statusGlyph cloudGlyph" aria-label="Via nuvem" />}</small></button>
+        <button className="roomName" aria-label={`Abrir ${item.name}`} onClick={() => setSelected(item.id)}><span className="tileName">{item.name}</span><small><PendingCopy pending={item.lights.some(light => isPending(light.id))} normal={status} />{online && item.lights.some(light => light.state.viaCloud) && <Cloud className="statusGlyph cloudGlyph" aria-label="Via nuvem" />}</small></button>
         {item.lights.some(light => controlError[light.id]) && <p className="tileError" role="alert">Falha ao mudar as luzes</p>}
-        {item.lights.some(light => isPending(light.id)) && <span className="tilePending" aria-label="Enviando comando" />}
         {on && <span className="srOnly" role="status" aria-label={`${item.name} luzes ligadas`}>Ligadas</span>}
       </motion.li>
     })}</ul></section>{alert}

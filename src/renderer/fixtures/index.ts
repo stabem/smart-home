@@ -38,7 +38,7 @@ export function houseTenRooms(): Room[] {
 
 export function createFixtureApi(fixture: 'house' | 'house10' | 'empty'): SmartHomeApi {
   const params = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search)
-  const latency = Math.min(5000, Math.max(0, Number(params.get('latency') || 0)))
+  const latency = Math.min(10000, Math.max(0, Number(params.get('latency') || 0)))
   const failure = params.get('failure')
   let failedOnce = false
   let rooms = fixture === 'house' ? houseRooms() : fixture === 'house10' ? houseTenRooms() : []

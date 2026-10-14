@@ -17,6 +17,7 @@
   --alert: #a52f31;
   --pool: rgba(255, 179, 64, .34);
   --pool-cool: rgba(79, 184, 245, .3);
+  --ease: cubic-bezier(.22, 1, .36, 1);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -116,14 +117,14 @@ h2 { font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--muted); l
   position: relative; min-width: 0; height: 106px; padding: 11px 12px 12px; overflow: hidden;
   border-radius: 20px; background: var(--module);
   box-shadow: inset 0 .5px 0 var(--module-top);
-  transition: background .25s ease-out, box-shadow .25s ease-out;
+  transition: background .25s var(--ease), box-shadow .25s var(--ease);
 }
 .roomTile::before {
   content: ''; position: absolute; inset: -40% -20% 20% -20%; pointer-events: none; opacity: 0; transform: scale(.6);
   background: radial-gradient(60% 70% at 18% 22%, var(--pool), transparent 70%);
-  transition: opacity .22s ease-out, transform .22s ease-out;
+  transition: opacity .25s var(--ease), transform .25s var(--ease);
 }
-.roomTile.isLit::before { opacity: 1; transform: scale(1); transition-duration: .45s; }
+.roomTile.isLit::before { opacity: 1; transform: scale(1); transition-duration: .6s; }
 .roomTile.isLit { background: color-mix(in srgb, var(--module) 88%, var(--accent) 12%); box-shadow: inset 0 .5px 0 rgba(255, 220, 160, .45); }
 .roomTile.isCool::after {
   content: ''; position: absolute; inset: 30% -25% -45% 25%; pointer-events: none;
@@ -178,13 +179,18 @@ input[role=switch] {
 .rooms.manyRooms .roomName { height: 36px; }
 .tileName { display: block; max-width: 100%; font-size: 16px; line-height: 19px; font-weight: 600; letter-spacing: -.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roomName small { display: block; max-width: 100%; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.roomTile:has(.isPending) .roomName { height: 49px; }
+.roomTile:has(.isPending) .roomName small { white-space: normal; font-size: 11px; line-height: 12px; overflow: visible; }
 .cloudGlyph { margin-left: 4px; opacity: .7; }
 .statusGlyph { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; opacity: .6; }
 .isLit .roomName small { color: color-mix(in srgb, var(--ink) 70%, var(--accent) 30%); }
-.tilePending, .controlPending { display: block; width: 6px; height: 6px; border-radius: 50%; background: #5ac8fa; animation: pendingPulse 1s ease-in-out infinite; }
-.tilePending { position: absolute; top: 24px; left: 50px; }
-.controlPending { margin-left: auto; }
-@keyframes pendingPulse { 50% { opacity: .25; } }
+.roomLights.isPending::after, .acPower.isPending::after, .pendingRing {
+  content: ''; position: absolute; inset: -4px; border: 2px solid #5ac8fa; border-radius: 50%;
+  pointer-events: none; animation: pendingBreathe 1.6s ease-in-out infinite;
+}
+.deviceHead { position: relative; }
+.deviceHead .pendingRing { left: -4px; top: -4px; width: 44px; height: 44px; }
+@keyframes pendingBreathe { 0%, 100% { opacity: .45; transform: scale(.96); } 50% { opacity: .9; transform: scale(1.06); } }
 .tileError, .controlError, .groupError, .acError, .error { color: var(--alert); font-size: 11px; line-height: 1.25; }
 .tileError { position: absolute; bottom: 2px; right: 10px; max-width: 60%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
 .roomTopbar { min-height: 22px; margin-bottom: 12px; }
@@ -206,6 +212,9 @@ input[role=switch] {
 .rangeLabel { margin-top: 12px; }
 .brightnessSlider, .acSlider { display: block; width: 100%; min-width: 0; touch-action: none; }
 .sliderTrack { position: relative; display: block; width: 100%; height: 34px; border-radius: 999px; background: linear-gradient(to right, #ffc761 var(--fill), var(--track) var(--fill)); box-shadow: inset 0 .5px 0 rgba(255,255,255,.2); touch-action: none; }
+.groupOn .brightnessSlider .sliderTrack { overflow: hidden; }
+.groupOn .brightnessSlider .sliderTrack::after { content: ''; position: absolute; inset: 0; width: 34%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.8), transparent); pointer-events: none; animation: groupHit .45s var(--ease) forwards; }
+@keyframes groupHit { from { transform: translateX(-100%); } to { transform: translateX(320%); opacity: 0; } }
 .acSlider .sliderTrack { height: 30px; background: linear-gradient(to right, #7fd3ff var(--fill), var(--track) var(--fill)); }
 .sliderIcon, .sliderValue { position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .sliderIcon { left: 12px; font-size: 17px; line-height: 1; color: #3a2a08; }
@@ -226,7 +235,7 @@ input[role=switch] {
 .acIcon { background: var(--circle); }
 .acIcon.active { background: linear-gradient(180deg, #86d4ff, #3aa9ea); box-shadow: inset 0 .5px 0 rgba(255,255,255,.6), 0 6px 18px rgba(79,184,245,.4); }
 .acIcon.active .lineIcon { filter: invert(1); }
-.acPower { margin-left: auto; font-size: 22px; line-height: 1; }
+.acPower { position: relative; margin-left: auto; font-size: 22px; line-height: 1; }
 .acPower.active { background: linear-gradient(180deg, #86d4ff, #3aa9ea); color: #fff; box-shadow: inset 0 .5px 0 rgba(255,255,255,.6), 0 6px 18px rgba(79,184,245,.4); }
 .acPower.isPending { box-shadow: inset 0 0 0 2px #5ac8fa, 0 0 0 2px rgba(90,200,250,.2); }
 .airMotion { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
@@ -272,6 +281,28 @@ input[role=switch] {
 .foundDevices ul { margin: 0; padding-left: 18px; font-size: 11px; }
 .foundDevices li { margin: 5px 0; }
 .foundDevices label { display: grid; gap: 4px; }
+.discoveryStage { margin-bottom: 10px; padding: 14px; border-radius: 20px; background: var(--module); box-shadow: inset 0 .5px 0 var(--module-top); }
+.discoveryOrbit { position: relative; height: 230px; overflow: hidden; }
+.discoveryRing { position: absolute; width: 270px; height: 148px; left: 50%; top: 50%; translate: -50% -50%; border: 1px dashed var(--muted); border-radius: 50%; opacity: .48; animation: ringReveal .8s var(--ease) both; }
+.discoveryRing.inner { width: 185px; height: 104px; border-style: solid; opacity: .2; }
+@keyframes ringReveal { from { opacity: 0; scale: .8; } }
+.discoveryChips { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.discoveryChip { position: absolute; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 11px; background: var(--glass); box-shadow: 0 3px 12px rgba(0,0,0,.12), inset 0 .5px 0 var(--inner); transform: translate(-50%, -50%); animation: chipReveal .5s var(--ease) both; animation-delay: calc(var(--chip-index) * 90ms); }
+.discoveryChip .roomGlyph { width: 18px; height: 18px; }
+.discoveryChip.seen { box-shadow: 0 0 0 2px var(--blue), 0 3px 12px rgba(0,0,0,.12); }
+.discoveryChip.seen::after { content: ''; position: absolute; right: -3px; top: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--blue); border: 2px solid var(--glass); animation: chipHit .4s var(--ease) both; animation-delay: calc(var(--chip-index) * 170ms); }
+@keyframes chipReveal { from { opacity: 0; scale: .6; } }
+@keyframes chipHit { from { opacity: 0; scale: .2; } }
+.discoveryCore { position: absolute; display: grid; place-items: center; gap: 2px; left: 50%; top: 50%; translate: -50% -50%; width: 82px; height: 76px; border-radius: 17px; background: var(--glass); box-shadow: 0 10px 28px rgba(0,0,0,.18), inset 0 .5px 0 var(--inner); font-size: 12px; font-weight: 600; animation: coreReveal .9s var(--ease) both; }
+.discoveryCore svg { width: 25px; height: 25px; }
+@keyframes coreReveal { from { opacity: 0; scale: .4; } }
+.discoveryStatus { min-height: 55px; }
+.discoveryStatus p { font-size: 13px; font-weight: 600; }
+.discoverySteps { display: flex; gap: 5px; margin-top: 12px; }
+.discoverySteps i { position: relative; flex: 1; height: 4px; border-radius: 4px; background: var(--track); overflow: hidden; }
+.discoverySteps i.done { background: var(--blue); }
+.discoverySteps i.now::after { content: ''; position: absolute; inset: 0; background: var(--blue); animation: stepBreathe 1.6s ease-in-out infinite; }
+@keyframes stepBreathe { 0%, 100% { opacity: .45; } 50% { opacity: .9; } }
 .groupSetup { display: grid; gap: 9px; }
 .groupSetup fieldset { min-width: 0; margin: 0; padding: 9px; border: .5px solid var(--inner); border-radius: 10px; }
 .groupSetup legend { font-size: 12px; font-weight: 600; }
