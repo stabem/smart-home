@@ -32,8 +32,12 @@ export interface SmartLifeHome { id: string; name: string; devices: SmartLifeDev
 export class SmartLifeRateLimitError extends Error {}
 
 export class SmartLifeRequestQueue {
-  private tail: Promise<void> = Promise.resolve()
-  private lastStart = -500
+  private readTail: Promise<void> = Promise.resolve()
+  private commandStartTail: Promise<void> = Promise.resolve()
+  private readonly commandCompletions = new Set<Promise<void>>()
+  private readonly deviceTails = new Map<string, Promise<void>>()
+  private lastReadStart = -500
+  private lastCommandStart = -120
   private pausedUntil = 0
   private failures = 0
   constructor(private readonly now = Date.now, private readonly sleep: (ms: number) => Promise<void> = ms => new Promise(resolve => setTimeout(resolve, ms)),
@@ -41,15 +45,44 @@ export class SmartLifeRequestQueue {
 
   coolingDown(): boolean { return this.now() < this.pausedUntil }
 
-  async run<T>(work: () => Promise<T>): Promise<T> {
-    const previous = this.tail
+  async run<T>(work: () => Promise<T>, lane: 'read' | 'command' = 'read', deviceId?: string): Promise<T> {
+    if (lane === 'command' && deviceId) {
+      const previous = this.deviceTails.get(deviceId) ?? Promise.resolve()
+      const task = previous.then(() => this.runLane(work, lane))
+      const tail = task.then(() => {}, () => {})
+      this.deviceTails.set(deviceId, tail)
+      try { return await task }
+      finally { if (this.deviceTails.get(deviceId) === tail) this.deviceTails.delete(deviceId) }
+    }
+    return this.runLane(work, lane)
+  }
+
+  private async runLane<T>(work: () => Promise<T>, lane: 'read' | 'command'): Promise<T> {
+    const previous = lane === 'command' ? this.commandStartTail : this.readTail
     let release!: () => void
-    this.tail = new Promise<void>(resolve => { release = resolve })
+    const tail = new Promise<void>(resolve => { release = resolve })
+    if (lane === 'command') this.commandStartTail = tail
+    else this.readTail = tail
     await previous
+    let released = false
+    let complete: (() => void) | undefined
+    let completion: Promise<void> | undefined
     try {
-      const wait = Math.max(0, this.lastStart + 500 - this.now(), this.pausedUntil - this.now())
-      if (wait) await this.sleep(wait)
-      this.lastStart = this.now()
+      if (lane === 'command') while (this.commandCompletions.size >= 4) await Promise.race(this.commandCompletions)
+      const spacing = lane === 'command' ? 120 : 500
+      let wait: number
+      do {
+        const lastStart = lane === 'command' ? this.lastCommandStart : this.lastReadStart
+        wait = Math.max(0, lastStart + spacing - this.now(), this.pausedUntil - this.now())
+        if (wait) await this.sleep(wait)
+      } while (wait)
+      if (lane === 'command') {
+        this.lastCommandStart = this.now()
+        completion = new Promise<void>(resolve => { complete = resolve })
+        this.commandCompletions.add(completion)
+        release()
+        released = true
+      } else this.lastReadStart = this.now()
       const result = await work()
       this.failures = 0
       return result
@@ -60,11 +93,15 @@ export class SmartLifeRequestQueue {
         this.failures++
       }
       throw error
-    } finally { release() }
+    } finally {
+      complete?.()
+      if (completion) this.commandCompletions.delete(completion)
+      if (!released) release()
+    }
   }
 }
 
-// Shared across login and device clients. Serial work also keeps each device at one in-flight request.
+// Shared across login and device clients; commands keep one in-flight request per device.
 const sharedQueue = new SmartLifeRequestQueue()
 
 function record(value: unknown): Record<string, unknown> {
@@ -163,7 +200,7 @@ export class SmartLifeCloud {
     }
   }
 
-  private async request(session: SmartLifeSession, path: string, params?: Record<string, string>, body?: object, refreshing = false): Promise<unknown> {
+  private async request(session: SmartLifeSession, path: string, params?: Record<string, string>, body?: object, refreshing = false, commandDeviceId?: string): Promise<unknown> {
     if (!refreshing) await this.refreshIfNeeded(session)
     return this.queue.run(async () => {
       const rid = randomUUID()
@@ -186,7 +223,7 @@ export class SmartLifeCloud {
       if (!response.ok) throw new Error(`Smart Life device request failed HTTP ${response.status}`)
       if (payload.success !== true) throw new Error(`Smart Life device request rejected code=${String(payload.code ?? '?')} msg=${String(payload.msg ?? '').slice(0, 80)}`)
       return typeof payload.result === 'string' && payload.result ? decrypt(payload.result, secret) : payload.result
-    })
+    }, commandDeviceId ? 'command' : 'read', commandDeviceId)
   }
 
   async refreshIfNeeded(session: SmartLifeSession): Promise<void> {
@@ -232,7 +269,7 @@ export class SmartLifeCloud {
   }
 
   async sendCommands(session: SmartLifeSession, id: string, commands: Array<{ code: string; value: unknown }>): Promise<void> {
-    try { await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands }) }
+    try { await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands }, false, id) }
     catch (error) {
       if (error instanceof Error && /code=2001(?:\s|$)/.test(error.message)) {
         this.onlineCache.set(id, false)
