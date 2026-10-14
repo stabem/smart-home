@@ -93,7 +93,7 @@ app.whenReady().then(() => {
       sandbox: true
     }
   })
-  popup.on('blur', () => popup?.hide())
+  popup.on('blur', () => { if (process.env.SMART_HOME_CAPTURE_WINDOW !== '1') popup?.hide() })
   popup.on('close', (event) => { event.preventDefault(); popup?.hide() })
   if (process.env.ELECTRON_RENDERER_URL) popup.loadURL(process.env.ELECTRON_RENDERER_URL)
   else popup.loadFile(join(__dirname, '../renderer/index.html'))

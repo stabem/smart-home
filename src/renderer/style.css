@@ -88,7 +88,7 @@ button:focus-visible, input:focus-visible, select:focus-visible,
   scrollbar-width: none;
 }
 .shell::-webkit-scrollbar, .editContent::-webkit-scrollbar { display: none; }
-.homeScreen { overflow: hidden; }
+.homeScreen { overflow-y: auto; overflow-x: hidden; }
 @media (prefers-reduced-transparency: reduce) {
   .shell { background: #f2f2f6; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }

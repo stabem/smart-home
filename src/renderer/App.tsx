@@ -11,7 +11,7 @@ import bulbIcon from './assets/icons/light-bulb.svg?url'
 import airIcon from './assets/icons/snow-flake.svg?url'
 import settingsIcon from './assets/icons/settings.svg?url'
 import backIcon from './assets/icons/arrow-left.svg?url'
-import { Bathroom, Bed, Closet, Cloud, Cutlery, HomeSimpleDoor, Laptop, PlugTypeC, SmallLamp, Sofa, Table, WashingMachine } from 'iconoir-react'
+import { Bathroom, Bed, Closet, Cloud, Cutlery, HomeSimpleDoor, Laptop, PlugTypeC, SmallLamp, Sofa, Table, WashingMachine } from 'iconoir-react/regular'
 import { roomIcon } from './roomIcons'
 
 const roomGlyphs = { sofa: Sofa, cutlery: Cutlery, table: Table, bed: Bed, laptop: Laptop, bath: Bathroom, closet: Closet, washer: WashingMachine, door: HomeSimpleDoor, lamp: SmallLamp }
@@ -122,8 +122,10 @@ export function App({ api }: { api: SmartHomeApi }) {
     const report = () => api.fitWindow?.(home.scrollHeight - 36)
     const observer = new ResizeObserver(report)
     observer.observe(home)
+    const changes = new MutationObserver(report)
+    changes.observe(home, { childList: true, subtree: true, characterData: true })
     report()
-    return () => observer.disconnect()
+    return () => { observer.disconnect(); changes.disconnect() }
   }, [api, rooms, selected, reconnecting])
   const visibleRooms = () => [...optimistic.current.values()].reduce((value, item) => applyCommand(value, item.command), baseRooms.current)
   async function refresh() { baseRooms.current = await api.getRooms(); setRooms(visibleRooms()); setSetup(await api.getSetupStatus()) }
