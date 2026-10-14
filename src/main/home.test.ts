@@ -263,7 +263,13 @@ describe('main process setup and control', () => {
       await vi.advanceTimersByTimeAsync(30000)
       lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
       expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
-      await vi.advanceTimersByTimeAsync(25000)
+      // Never-ON: every read explicitly OFF → after the background window the AC shows OFF.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const neverOn = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await neverOn
+      await vi.advanceTimersByTimeAsync(30000)
       const rooms = await home.rooms()
       expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
       // An authoritative ON read (turned on elsewhere) clears the off marker once the stale window has passed.
