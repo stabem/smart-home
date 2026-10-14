@@ -237,10 +237,63 @@ describe('main process setup and control', () => {
     ] }])
     await home.beginLogin('test-code')
     const found = await home.discover()
-    expect(found.find(room => room.name === 'Quarto')?.lights[0].name).toBe('Office 2')
+    expect(found.find(room => room.name === 'Quarto')?.lights[0].name).toBe('Cortineiro do Quarto')
     await home.save({ 'switch::2': 'home-1:office' })
     expect(store.save.mock.calls[0][0].lightRoomIds).toEqual({ 'switch::2': 'home-1:office' })
     expect((await home.rooms()).find(room => room.name === 'Office')?.lights.map(light => light.id)).toEqual(['switch', 'switch::2'])
+  })
+
+  it('applies and persists house defaults from anonymized discovery without naming pending switches', async () => {
+    const discovered: SmartLifeHome[] = [{ id: 'house', name: 'Casa', devices: [
+      { id: 'living', name: 'Sala de Estar', category: 'kg', localKey: 'fixture-key', homeId: 'house',
+        channels: [1, 2, 3, 4].map(dp => ({ dp, name: `Canal ${dp}` })) },
+      { id: 'office-switch', name: 'Office', category: 'kg', localKey: 'fixture-key', homeId: 'house',
+        roomId: 'office', roomName: 'Office', channels: [1, 2].map(dp => ({ dp, name: `Canal ${dp}` })) },
+      { id: 'laundry', name: 'Luz', category: 'dj', localKey: 'fixture-key', homeId: 'house', roomId: 'laundry', roomName: 'Lavandeira' },
+      { id: 'bath', name: 'Luz', category: 'dj', localKey: 'fixture-key', homeId: 'house', roomId: 'bath', roomName: 'banheiro suíte' },
+      { id: 'kitchen', name: 'Cozinha', category: 'kg', localKey: 'fixture-key', homeId: 'house', roomId: 'kitchen', roomName: 'Cozinha',
+        channels: [1, 2, 3].map(dp => ({ dp, name: `Canal ${dp}` })) },
+      { id: 'kitchen-loose', name: 'Luz Cozinha', category: 'dj', localKey: 'fixture-key', homeId: 'house' },
+      { id: 'hall', name: 'Corredor', category: 'dj', localKey: 'fixture-key', homeId: 'house' }
+    ] }]
+    const { home, tuya, lg, store } = harness()
+    tuya.discover.mockResolvedValueOnce(discovered)
+    lg.listAcs.mockResolvedValueOnce([{ id: 'living-ac', name: 'Ar Condicionado da Sala', state: { on: false, targetTemperature: 23, online: true } }])
+    await home.beginLogin('test-code')
+    const rooms = await home.discover()
+    const inRoom = (name: string) => rooms.find(room => room.name === name)!
+    expect(inRoom('Sala de estar').lights.map(light => light.name)).toEqual(['LED teto', 'Lustre', 'Cortineiro da sala'])
+    expect(inRoom('Sala de estar').acs.map(ac => ac.id)).toEqual(['living-ac'])
+    expect(inRoom('Mesa de jantar').lights.map(light => light.name)).toEqual(['LED sala de jantar'])
+    expect(inRoom('Office').lights.map(light => light.name)).toEqual(['Cortineiro do Office'])
+    expect(inRoom('Quarto').lights.map(light => light.name)).toEqual(['Cortineiro do Quarto'])
+    expect(inRoom('Lavanderia').lights.map(light => light.id)).toEqual(['laundry'])
+    expect(inRoom('Banheiro suíte').lights.map(light => light.id)).toEqual(['bath'])
+    expect(inRoom('Cozinha').lights.map(light => light.name)).toEqual(['Cozinha 1', 'Cozinha 2', 'Cozinha 3', 'Luz Cozinha'])
+    expect(inRoom('Sem cômodo').lights.map(light => light.id)).toEqual(['hall'])
+    await home.save()
+    const saved = store.save.mock.lastCall![0]
+    expect(saved.lightNames).toMatchObject({ living: 'LED teto', 'living::2': 'LED sala de jantar', 'living::3': 'Lustre',
+      'living::4': 'Cortineiro da sala', 'office-switch': 'Cortineiro do Office', 'office-switch::2': 'Cortineiro do Quarto' })
+    expect(saved.lightRoomIds?.['living::2']).toBe('house:Mesa de jantar')
+    expect(saved.lightRoomIds?.['office-switch::2']).toBe('house:Quarto')
+    expect(saved.lightRoomIds?.['kitchen-loose']).toBe('house:kitchen')
+  })
+
+  it('migrates only empty default fields and keeps edited gang names and rooms', () => {
+    const saved: SavedSetup = { homes: [{ id: 'house', name: 'Casa', devices: [
+      { id: 'switch', name: 'Office', category: 'kg', localKey: 'fixture-key', homeId: 'house', roomId: 'office', roomName: 'Office',
+        channels: [1, 2].map(dp => ({ dp, name: `Canal ${dp}` })) },
+      { id: 'other', name: 'Quarto', category: 'dj', localKey: 'fixture-key', homeId: 'house', roomId: 'bed', roomName: 'Quarto' }
+    ] }], acs: [], lightNames: { switch: 'Meu cortineiro', 'switch::2': '' }, lightRoomIds: { switch: 'house:bed', 'switch::2': '' } }
+    const { home, store } = harness(saved)
+    expect(store.save).toHaveBeenCalledOnce()
+    const migrated = store.save.mock.lastCall![0]
+    expect(migrated.lightNames).toMatchObject({ switch: 'Meu cortineiro', 'switch::2': 'Cortineiro do Quarto' })
+    expect(migrated.lightRoomIds).toMatchObject({ switch: 'house:bed', 'switch::2': 'house:bed' })
+    expect(home.groupSetup().rooms.find(room => room.name === 'Quarto')?.lights.map(light => light.name)).toEqual(['Meu cortineiro', 'Cortineiro do Quarto', 'Quarto'])
+    harness(migrated)
+    expect(store.save).toHaveBeenCalledOnce()
   })
 
   it('rejects malformed IPC commands before any device call', async () => {
