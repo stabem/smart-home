@@ -117,6 +117,19 @@ export class LgClient {
   }
 
   async getAcState(id: string, signal?: AbortSignal): Promise<LgAcState> {
+    try {
+      return await this.readAcState(id, signal)
+    } catch (error) {
+      // Fixed reason codes only: never the thrown text, which could echo an LG response.
+      const message = error instanceof Error ? error.message : ''
+      const reason = /aborted|AbortError/i.test(message) ? 'timeout' : /^LG API request failed \((\d+)\)/.test(message) ? `http-${RegExp.$1}`
+        : /power state missing/.test(message) ? 'no-operation' : /target temperature missing/.test(message) ? 'no-target' : 'parse'
+      console.info(`LG state id=${id.slice(0, 8)} result=failed reason=${reason}`)
+      throw error
+    }
+  }
+
+  private async readAcState(id: string, signal?: AbortSignal): Promise<LgAcState> {
     const report = object(await this.request(`devices/${encodeURIComponent(id)}/state`, undefined, signal))
     const celsius = Array.isArray(report.temperatureInUnits)
       ? report.temperatureInUnits.find(item => object(item).unit === 'C') : undefined
@@ -129,7 +142,7 @@ export class LgClient {
     const powerSave = property(report, 'powerSave', 'powerSaveEnabled')
     const profile = report.airFlow ? await this.getAcProfile(id, signal).catch(() => null) : null
     const wind = profile ? string(property(report, 'airFlow', fanKey(profile))) : undefined
-    console.info(`LG state operation=${on} mode=${mode && Object.hasOwn(modeNames, mode) ? mode : 'other'} fan=${wind && Object.hasOwn(fanNames, wind) ? wind : 'other'}`)
+    console.info(`LG state id=${id.slice(0, 8)} result=ok operation=${on} mode=${mode && Object.hasOwn(modeNames, mode) ? mode : 'other'} fan=${wind && Object.hasOwn(fanNames, wind) ? wind : 'other'}`)
     return {
       on: on === 'POWER_ON',
       currentTemperature: number(temp.currentTemperatureC ?? temp.currentTemperature),

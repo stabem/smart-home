@@ -29,7 +29,20 @@ describe('ThinQ AC client', () => {
           airConJobMode: { currentJobMode: secret }, airFlow: { windStrength: secret } }
       })
       await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')
-      expect(log).toHaveBeenCalledWith('LG state operation=POWER_ON mode=other fan=other')
+      expect(log).toHaveBeenCalledWith('LG state id=ac-1 result=ok operation=POWER_ON mode=other fan=other')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
+    } finally { log.mockRestore() }
+  })
+  it('logs a fixed failure reason with the id prefix when a state read fails, never the response text', async () => {
+    const secret = 'SENTINEL-LG-SECRET'
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const missing = mockFetch({ '/devices/ac-1/state': { temperature: { targetTemperatureC: 23 }, note: secret } })
+      await expect(new LgClient('test-token', 'BR', missing).getAcState('ac-1')).rejects.toThrow('power state missing')
+      expect(log).toHaveBeenCalledWith('LG state id=ac-1 result=failed reason=no-operation')
+      const failing = vi.fn(async () => new Response(JSON.stringify({ error: { code: '1000', message: secret } }), { status: 500 })) as unknown as typeof fetch
+      await expect(new LgClient('test-token', 'BR', failing).getAcState('ac-2')).rejects.toThrow()
+      expect(log).toHaveBeenCalledWith('LG state id=ac-2 result=failed reason=http-500')
       expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
     } finally { log.mockRestore() }
   })

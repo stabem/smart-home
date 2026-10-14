@@ -1,5 +1,16 @@
 {
   "promise": "LG 2304 returns OFF to the renderer before the repair read, then refreshes state without letting a stale ON read replace that OFF.",
-  "scopePaths": [".graphhelm/keel-card.json", "src/shared/types.ts", "src/preload/index.ts", "src/preload/index.test.ts", "src/main/lg/client.ts", "src/main/lg/client.test.ts", "src/main/home.ts", "src/main/home.test.ts", "src/renderer/App.tsx", "tests/interaction.spec.ts"],
+  "scopePaths": [
+    ".graphhelm/keel-card.json",
+    "src/main/home.test.ts",
+    "src/main/home.ts",
+    "src/main/lg/client.test.ts",
+    "src/main/lg/client.ts",
+    "src/preload/index.test.ts",
+    "src/preload/index.ts",
+    "src/renderer/App.tsx",
+    "src/shared/types.ts",
+    "tests/interaction.spec.ts"
+  ],
   "proof": "npx vitest run src/main/home.test.ts; SMART_HOME_TEST_PORT=5175 npx playwright test tests/interaction.spec.ts -g 'LG 2304 turns'; sh ci/local-ci.sh"
 }
