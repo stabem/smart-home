@@ -117,6 +117,18 @@ describe('main process setup and control', () => {
     await home.rooms()
     expect(tuya.setLight).not.toHaveBeenCalled()
   })
+  it('shows an offline track as without power and never syncs its 2001 member', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [], groupLastState: { 'group:office:Office': { on: true } } })
+    tuya.getState.mockImplementation(async (id: string) => id === 'bulb-1'
+      ? { on: false, online: false, reason: 'sem energia ou fora da rede' } : { on: true, online: true })
+    const track = (await home.rooms())[0].lights[0]
+    expect(track.state).toMatchObject({ on: false, online: false, reason: 'sem energia ou fora da rede' })
+    expect(tuya.setLight).not.toHaveBeenCalledWith('bulb-1', expect.anything())
+    tuya.setLight.mockImplementation(async (id: string) => id === 'bulb-1'
+      ? { on: false, online: false, reason: 'sem energia ou fora da rede' } : { on: true, online: true })
+    await expect(home.command({ kind: 'light.power', deviceId: track.id, on: true })).rejects.toThrow('Sem energia: Office_1')
+    expect(tuya.setLight.mock.calls.filter(([id]) => id === 'bulb-1')).toHaveLength(1)
+  })
   it('does not accept an unconfirmed off reply as a successful group on command', async () => {
     const { home, tuya } = harness({ homes: trackHomes, acs: [] })
     const id = home.groupSetup().groups[0].id
