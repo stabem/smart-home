@@ -1,5 +1,5 @@
 {
-  "promise": "Group commands start all members together, with LAN members first, while preserving each member retry and partial-failure names. Smart Life commands start up to four at 120 ms spacing, status reads stay at 500 ms spacing, and -9999999 pauses both lanes. Apagar tudo uses the same concurrent command path.",
-  "scopePaths": [".graphhelm/keel-card.json", "src/main/home.ts", "src/main/home.test.ts", "src/main/tuya/cloud.ts", "src/main/tuya/tuya.test.ts"],
-  "proof": "npx vitest run src/main/home.test.ts src/main/tuya/tuya.test.ts; sh ci/local-ci.sh"
+  "promise": "A light that is on shows a slow breathing halo on its amber control and lit room tiles' light pool breathes; paused when the popup is hidden, static under reduced motion. Nothing else changes.",
+  "scopePaths": ["src/renderer/style.css", "tests/issue-63.spec.ts", ".graphhelm/keel-card.json"],
+  "proof": "sh ci/local-ci.sh && echo PROOF_OK"
 }

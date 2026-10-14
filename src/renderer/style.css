@@ -146,6 +146,16 @@ h2 { font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--muted); l
 .roomLights[data-selected], .lightSwitch[data-selected] {
   background: linear-gradient(180deg, #ffc866, var(--accent-deep));
   box-shadow: inset 0 .5px 0 rgba(255, 255, 255, .6), 0 0 0 1px rgba(255, 179, 64, .25), 0 6px 18px rgba(255, 170, 40, .45);
+  animation: litHalo 3.2s ease-in-out infinite;
+}
+@keyframes litHalo {
+  50% { box-shadow: inset 0 .5px 0 rgba(255, 255, 255, .6), 0 0 0 3px rgba(255, 179, 64, .18), 0 8px 26px rgba(255, 170, 40, .62); }
+}
+.roomTile.isLit::before { animation: litPool 3.2s ease-in-out infinite; }
+@keyframes litPool { 50% { opacity: .82; } }
+body.hidden .roomLights[data-selected], body.hidden .lightSwitch[data-selected], body.hidden .roomTile.isLit::before { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .roomLights[data-selected], .lightSwitch[data-selected], .roomTile.isLit::before { animation: none; }
 }
 .roomLights[data-selected] .lampSymbol, .lightSwitch[data-selected] .lampSymbol { filter: invert(1); opacity: 1; }
 @media (prefers-color-scheme: dark) {
