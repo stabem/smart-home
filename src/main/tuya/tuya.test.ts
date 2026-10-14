@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { createCipheriv } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, createHmac } from 'node:crypto'
 import type { Socket } from 'node:net'
 import type { Socket as UdpSocket } from 'node:dgram'
 import { describe, expect, it, vi } from 'vitest'
@@ -206,6 +206,17 @@ describe('Tuya LAN', () => {
     await expect(pending).rejects.toThrow('Tuya device offline')
     expect(Date.now() - started).toBeLessThan(2000)
   })
+  it('reopens a socket after ECONNRESET before the reply waiter is installed', async () => {
+    let opened = 0
+    class ResetSocket extends EventEmitter {
+      write(): boolean { this.emit('error', new Error('read ECONNRESET')); return true }
+      destroy(): this { this.emit('close'); return this }
+    }
+    const client = new TuyaLanClient(() => { opened++; return new ResetSocket() as unknown as Socket })
+    await expect(client.request(device)).rejects.toThrow('ECONNRESET')
+    await expect(client.request(device)).rejects.toThrow('ECONNRESET')
+    expect(opened).toBe(2)
+  })
 })
 
 describe('Smart Life QR flow', () => {
@@ -277,6 +288,7 @@ describe('Smart Life QR flow', () => {
     const homes = await cloud.listHomes({ endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' })
     expect(paths.filter(path => path.endsWith('/specifications'))).toEqual(['/v1.1/m/life/bulb/specifications'])
     expect(homes[0].devices[0].dpMap).toEqual({ switch_led: 20, bright_value_v2: 22, colour_data_v2: 24 })
+    expect(homes[0].devices[0].cloudCodes).toEqual(['switch_led', 'bright_value_v2'])
   })
   it('uses the sharing SDK local strategy when specification has no dp_id', async () => {
     const fetcher = vi.fn(async (url: string) => {
@@ -319,6 +331,35 @@ describe('Smart Life QR flow', () => {
     expect(fetcher.mock.calls[1][1].headers['X-token']).toBe('new-token')
     expect(fetcher.mock.calls[1][1].body).not.toContain('switch_1')
     expect(changed).toHaveBeenCalledOnce()
+  })
+  it('matches the sharing SDK command POST, encrypted bytes and signature', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: null }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const current: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fixture-token', refreshToken: 'fixture-refresh',
+      expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    await cloud.sendCommands(current, 'bulb', [{ code: 'switch_led', value: true }])
+    const [url, options] = fetcher.mock.calls[0]
+    expect(new URL(url).pathname).toBe('/v1.1/m/thing/bulb/commands')
+    expect(options.method).toBe('POST')
+    const headers = options.headers as Record<string, string>
+    const encoded = JSON.parse(options.body as string).encdata as string
+    expect(Object.keys(JSON.parse(options.body as string))).toEqual(['encdata'])
+    const hashKey = createHash('md5').update(headers['X-requestId'] + current.refreshToken).digest('hex')
+    const secret = createHmac('sha256', headers['X-requestId']).update(hashKey).digest('hex').slice(0, 16)
+    const bytes = Buffer.from(encoded, 'base64')
+    const decipher = createDecipheriv('aes-128-gcm', Buffer.from(secret), bytes.subarray(0, 12))
+    decipher.setAuthTag(bytes.subarray(-16))
+    const plain = Buffer.concat([decipher.update(bytes.subarray(12, -16)), decipher.final()]).toString()
+    expect(plain).toBe('{"commands":[{"code":"switch_led","value":true}]}')
+    const signed = ['X-appKey', 'X-requestId', 'X-time', 'X-token'].map(name => `${name}=${headers[name]}`).join('||') + encoded
+    expect(headers['X-sign']).toBe(createHmac('sha256', hashKey).update(signed).digest('hex'))
+  })
+  it('surfaces the sharing API error message with code 2001', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: false, code: 2001, msg: 'function not supported' }) })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    await expect(cloud.sendCommands({ endpoint: 'https://example.invalid', accessToken: 'fixture', refreshToken: 'fixture',
+      expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }, 'bulb', [{ code: 'switch_led', value: true }]))
+      .rejects.toThrow('code=2001 msg=function not supported')
   })
   it('refreshes shortly before expiry and signals the encrypted store to persist new tokens', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true,
@@ -455,6 +496,20 @@ describe('typed light service', () => {
     expect(cloud.sendCommands).toHaveBeenCalledWith(session, 'light-1', [{ code: 'switch_led', value: true }])
     expect(lan.request).toHaveBeenCalledTimes(1)
   })
+  it('renegotiates 3.5 on a fresh request after ECONNRESET before cloud fallback', async () => {
+    const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home', dpMap: { switch_led: 20 } }] }]),
+      sendCommands: vi.fn() }
+    const lan = { request: vi.fn().mockRejectedValueOnce(new Error('read ECONNRESET'))
+      .mockResolvedValueOnce({}).mockResolvedValueOnce({ '20': true }) }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient,
+      vi.fn().mockResolvedValue(new Map([['light-1', { id: 'light-1', ip: device.ip, version: '3.5' }]])))
+    await service.discover(session)
+    expect(await service.setLight('light-1', { on: true })).toEqual({ on: true, online: true })
+    expect(lan.request).toHaveBeenCalledTimes(3)
+    expect(lan.request.mock.calls[0][0].version).toBe('3.5')
+    expect(lan.request.mock.calls[1][0].version).toBe('3.5')
+    expect(cloud.sendCommands).not.toHaveBeenCalled()
+  })
 
   it('scrubs a saved WAN IP and persists the corrected setup', async () => {
     const homes = [{ id: 'home', name: 'Casa', devices: [
@@ -546,8 +601,8 @@ describe('typed light service', () => {
   })
   it('scales v2 color and brightness in queued cloud fallback', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home',
-      cloudCodes: ['switch_led', 'bright_value_v2', 'colour_data_v2'], dpMap: { switch_led: 20, bright_value_v2: 22, colour_data_v2: 24 } }] }]),
-      deviceStatus: vi.fn().mockResolvedValue({ switch_led: true, bright_value_v2: 505, colour_data_v2: { h: 0, s: 1000, v: 1000 } }),
+      cloudCodes: ['switch_led', 'bright_value_v2', 'work_mode', 'colour_data_v2'], dpMap: { switch_led: 20, bright_value_v2: 22, colour_data_v2: 24 } }] }]),
+      deviceStatus: vi.fn().mockResolvedValue({ switch_led: true, bright_value_v2: 505, colour_data_v2: '{"h":0,"s":1000,"v":1000}' }),
       sendCommands: vi.fn().mockResolvedValue(undefined) }
     const service = new TuyaService(cloud as unknown as SmartLifeCloud, { request: vi.fn() } as unknown as TuyaLanClient,
       vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
@@ -556,7 +611,7 @@ describe('typed light service', () => {
       .toMatchObject({ on: true, brightness: 50, color: '#ff0000', viaCloud: true })
     expect(cloud.sendCommands).toHaveBeenCalledWith(session, 'light-1', [
       { code: 'switch_led', value: true }, { code: 'bright_value_v2', value: 505 },
-      { code: 'work_mode', value: 'colour' }, { code: 'colour_data_v2', value: { h: 0, s: 1000, v: 1000 } }
+      { code: 'work_mode', value: 'colour' }, { code: 'colour_data_v2', value: '{"h":0,"s":1000,"v":1000}' }
     ])
   })
 
