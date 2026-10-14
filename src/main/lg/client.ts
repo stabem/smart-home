@@ -129,6 +129,7 @@ export class LgClient {
     const powerSave = property(report, 'powerSave', 'powerSaveEnabled')
     const profile = report.airFlow ? await this.getAcProfile(id).catch(() => null) : null
     const wind = profile ? string(property(report, 'airFlow', fanKey(profile))) : undefined
+    console.info(`LG state id=${id.slice(0, 8)} operation=${on} mode=${mode ?? '-'} fan=${wind ?? '-'} target=${target}`)
     return {
       on: on === 'POWER_ON',
       currentTemperature: number(temp.currentTemperatureC ?? temp.currentTemperature),

@@ -393,9 +393,22 @@ export class HomeController {
           : command.kind === 'ac.mode' ? { mode: command.mode }
             : command.kind === 'ac.fan' ? { fan: command.fan }
               : { turbo: command.on }
-      try { await this.lg.setAc(ac.id, patch) }
-      catch (error) {
-        console.error(`LG AC control failed id=${ac.id}: ${error instanceof Error ? error.message : 'UnknownError'}`)
+      try {
+        await this.lg.setAc(ac.id, patch)
+        console.info(`LG control ok id=${ac.id.slice(0, 8)} ${command.kind}`)
+        if (patch.on === true) {
+          // LG accepts POWER_ON before the unit reacts; confirm it actually came on.
+          let confirmed = false
+          for (let attempt = 0; attempt < 3 && !confirmed; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 2000))
+            confirmed = await this.lg.getAcState(ac.id).then(state => state.on).catch(() => false)
+          }
+          if (!confirmed) throw new Error('O ar não ligou. Confira se ele está na tomada e tente de novo.')
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'UnknownError'
+        console.error(`LG AC control failed id=${ac.id.slice(0, 8)} ${command.kind}: ${message}`)
+        if (/POWER OFF/i.test(message)) throw new Error('O ar está desligado. Ligue primeiro.')
         throw error
       }
       return

@@ -1,5 +1,5 @@
 {
-  "promise": "When an AC is on, its module shows three soft drifting cool streaks (CSS), pauses when the popup is hidden, static under reduced motion; the dead air.lottie is removed. Nothing else changes.",
-  "scopePaths": ["src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/main.tsx", "src/renderer/assets/lottie/air.lottie", "docs/CREDITS.md", ".graphhelm/keel-card.json"],
-  "proof": "sh ci/local-ci.sh && echo PROOF_OK"
+  "promise": "AC state reads and control results are logged (redacted); LG 2304 becomes 'O ar está desligado. Ligue primeiro.'; POWER_ON is confirmed by re-reading state (3×2 s) or rolled back with 'O ar não ligou'. Nothing else changes.",
+  "scopePaths": ["src/main/lg/client.ts", "src/main/home.ts", "src/main/home.test.ts", "src/renderer/App.tsx", ".graphhelm/keel-card.json"],
+  "proof": "npx vitest run src/main/home.test.ts && echo PROOF_OK"
 }

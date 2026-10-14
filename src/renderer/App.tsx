@@ -206,7 +206,7 @@ export function App({ api }: { api: SmartHomeApi }) {
         } catch (cause) {
           if (optimistic.current.get(key)?.version === next.version) {
             optimistic.current.delete(key)
-            setControlError(current => ({ ...current, [value.deviceId]: cause instanceof Error && (cause.message.startsWith('Falha em:') || cause.message.startsWith('Sem energia')) ? cause.message : value.kind.startsWith('ac.') ? 'Ar não respondeu. Tente novamente.' : 'Dispositivo não respondeu. Tente novamente.' }))
+            setControlError(current => ({ ...current, [value.deviceId]: cause instanceof Error && (cause.message.startsWith('Falha em:') || cause.message.startsWith('Sem energia') || cause.message.startsWith('O ar ')) ? cause.message : value.kind.startsWith('ac.') ? 'Ar não respondeu. Tente novamente.' : 'Dispositivo não respondeu. Tente novamente.' }))
           }
         }
         setRooms(visibleRooms())

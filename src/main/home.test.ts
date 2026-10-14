@@ -201,8 +201,30 @@ describe('main process setup and control', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2207: Invalid command'))
     await expect(home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })).rejects.toThrow('2207')
-    expect(log).toHaveBeenCalledWith('LG AC control failed id=ac-1: LG API request failed (400): 2207: Invalid command')
+    expect(log).toHaveBeenCalledWith('LG AC control failed id=ac-1 ac.power: LG API request failed (400): 2207: Invalid command')
     log.mockRestore()
+  })
+  it('turns LG 2304 (POWER OFF) into a plain instruction and confirms POWER_ON before reporting success', async () => {
+    vi.useFakeTimers()
+    try {
+      const { home, lg } = harness({ homes, acs: [{ id: 'ac-1', name: 'Ar Sala de estar' }] })
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.spyOn(console, 'info').mockImplementation(() => {})
+      lg.setAc.mockRejectedValueOnce(new Error('LG API request failed (400): 2304: Command not supported in POWER OFF'))
+      await expect(home.command({ kind: 'ac.temperature', deviceId: 'ac-1', temperature: 20 })).rejects.toThrow('O ar está desligado. Ligue primeiro.')
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValueOnce({ on: false, targetTemperature: 23, online: true }).mockResolvedValueOnce({ on: true, targetTemperature: 23, online: true })
+      const pending = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(4100)
+      await expect(pending).resolves.toBeUndefined()
+      expect(lg.getAcState).toHaveBeenCalledTimes(2)
+      lg.setAc.mockResolvedValueOnce(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const failing = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      const outcome = failing.catch((error: Error) => error.message)
+      await vi.advanceTimersByTimeAsync(6100)
+      await expect(outcome).resolves.toMatch(/^O ar não ligou/)
+    } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
 
   it('keeps every unmatched AC in Sem cômodo and saves the chosen room mapping', async () => {
