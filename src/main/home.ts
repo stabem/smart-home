@@ -115,7 +115,15 @@ function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boo
 }
 
 export class HomeController {
-  private readonly authoritativeOff = new Set<string>()
+  /** AC id → when LG last said it is off (2304 or confirmed OFF). Reads within STALE_WINDOW_MS cannot override it. */
+  private readonly authoritativeOff = new Map<string, number>()
+  private static readonly STALE_WINDOW_MS = 15_000
+  /** AC id → expiry of an optimistic ON that is still being confirmed; reads saying OFF do not override it until then. */
+  private readonly pendingOn = new Map<string, number>()
+  /** Safety cap only: the loop (8 × (3 s wait + ≤4 s read) ≈ 56 s) releases the marker itself. */
+  private static readonly PENDING_ON_MS = 90_000
+  /** Generation per AC: a superseded background confirmation must not touch state. */
+  private readonly confirmGeneration = new Map<string, number>()
   private saved: SavedSetup | null
   private draft: SavedSetup | null = null
   private qrToken: string | null = null
@@ -349,10 +357,42 @@ export class HomeController {
     this.store.save(this.saved)
   }
 
+  /** Background confirmation after POWER_ON: reads every 3 s for up to 24 s; only an explicit, final POWER_OFF marks the AC off. */
+  private async confirmPowerOnLater(ac: AirConditioner): Promise<void> {
+    if (!this.lg) return
+    const generation = this.confirmGeneration.get(ac.id) ?? 0
+    const superseded = (): boolean => this.confirmGeneration.get(ac.id) !== generation
+    this.pendingOn.set(ac.id, Date.now() + HomeController.PENDING_ON_MS)
+    const release = (): void => { if (!superseded()) this.pendingOn.delete(ac.id) }
+    let last: AcState | undefined
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      if (superseded()) return
+      last = await this.lg.getAcState(ac.id).catch(() => undefined)  // only the final explicit read decides OFF
+      if (superseded()) return
+      if (last?.on) { this.authoritativeOff.delete(ac.id); release(); console.info('LG confirm result=on'); return }
+    }
+    if (superseded()) return
+    release()
+    if (last && !last.on) {
+      this.authoritativeOff.set(ac.id, Date.now())
+      ac.state = { ...last, on: false }
+      console.info('LG confirm result=off')
+    } else console.info('LG confirm result=unknown')
+  }
+
   private async acState(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
-    if (this.authoritativeOff.has(ac.id)) ac.state = { ...ac.state, on: false }
+    // Right after LG said OFF, an ON read is probably stale and must not override it; later, an ON read
+    // (e.g. turned on from the LG app) is authoritative and clears the marker.
+    const pendingUntil = this.pendingOn.get(ac.id)
+    if (pendingUntil !== undefined && Date.now() < pendingUntil && ac.state.online && !ac.state.on) ac.state = { ...ac.state, on: true }
+    const since = this.authoritativeOff.get(ac.id)
+    if (since !== undefined) {
+      if (Date.now() - since < HomeController.STALE_WINDOW_MS || !(ac.state.online && ac.state.on)) ac.state = { ...ac.state, on: false }
+      else this.authoritativeOff.delete(ac.id)
+    }
   }
 
   async command(command: unknown): Promise<void | { ok: boolean; state: AcState; error?: string }> {
@@ -395,6 +435,9 @@ export class HomeController {
           : command.kind === 'ac.mode' ? { mode: command.mode }
             : command.kind === 'ac.fan' ? { fan: command.fan }
               : { turbo: command.on }
+      // Any newer AC command supersedes a running background confirmation for this AC.
+      this.confirmGeneration.set(ac.id, (this.confirmGeneration.get(ac.id) ?? 0) + 1)
+      this.pendingOn.delete(ac.id)
       const deadlineController = patch.on === true ? new AbortController() : undefined
       const deadline = deadlineController?.signal
       const deadlineTimer = deadlineController ? setTimeout(() => deadlineController.abort(), 6000) : undefined
@@ -420,14 +463,15 @@ export class HomeController {
             })
             state = await read(deadline) ?? state
           }
-          if (!state?.on) errorMessage = 'O ar não ligou. Confira se ele está na tomada e tente de novo.'
+          // LG often needs more than 6 s to report POWER_ON. Keep the optimistic ON and finish confirming in the background.
+          if (!state?.on) { state = { ...(state ?? ac.state), on: true, online: true }; void this.confirmPowerOnLater(ac) }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : ''
         code = /^LG API request failed \(\d{3}\): (2304|2207)(?::|\b)/.exec(message)?.[1] ?? 'other'
         errorMessage = code === '2304' ? 'O ar está desligado. Ligue primeiro.' : 'Ar não respondeu. Tente novamente.'
         if (code === '2304') {
-          this.authoritativeOff.add(ac.id)
+          this.authoritativeOff.set(ac.id, Date.now())
           ac.state = { ...ac.state, on: false, online: true }
           console.info(`LG control result=failed kind=${command.kind} code=2304`)
           if (deadlineTimer) clearTimeout(deadlineTimer)
