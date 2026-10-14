@@ -1,7 +1,7 @@
 import type { AirConditioner, DeviceCommand, Room, SetupStatus } from '../shared/types'
 import { LgClient } from './lg/client'
 import { SetupStore, type SavedSetup } from './store'
-import { SmartLifeCloud, TuyaService, type SmartLifeHome, type SmartLifeSession } from './tuya'
+import { SmartLifeCloud, TuyaService, confirms, type SmartLifeHome, type SmartLifeSession } from './tuya'
 import { applyLightGroups, suggestLightGroups, validateLightGroups } from './light-groups'
 import type { LightGroup, LightState } from '../shared/types'
 
@@ -190,7 +190,7 @@ export class HomeController {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const state = await this.tuya.setLight(id, patch)
-        if (state.online) return state
+        if (confirms(state, patch)) return state
         last = new Error('offline after LAN and cloud control')
       } catch (error) { last = error }
       const message = last instanceof Error ? last.message : 'unknown'
@@ -207,7 +207,7 @@ export class HomeController {
       if (!desired) continue
       const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
       const patch = Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key))) as Partial<LightState>
-      const drifted = members.filter(light => light.state.online && !light.state.stale && Object.entries(patch).some(([key, value]) => light.state[key as keyof LightState] !== value))
+      const drifted = members.filter(light => light.state.online && !light.state.stale && !confirms(light.state, patch))
         .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
       const results = []
       for (const light of drifted) results.push(await Promise.allSettled([this.setGroupMember(light.id, patch)]).then(([result]) => result))
