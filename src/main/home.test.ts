@@ -243,6 +243,8 @@ describe('main process setup and control', () => {
       await vi.advanceTimersByTimeAsync(6100)
       // Not confirmed within the IPC window: stays optimistic ON and keeps confirming in the background.
       await expect(slow).resolves.toMatchObject({ ok: true, state: { on: true } })
+      // An immediate refresh while LG still lags (reads OFF) must keep the optimistic ON.
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
       await vi.advanceTimersByTimeAsync(25000)
       const rooms = await home.rooms()
       expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)

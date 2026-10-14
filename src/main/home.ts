@@ -118,6 +118,9 @@ export class HomeController {
   /** AC id → when LG last said it is off (2304 or confirmed OFF). Reads within STALE_WINDOW_MS cannot override it. */
   private readonly authoritativeOff = new Map<string, number>()
   private static readonly STALE_WINDOW_MS = 15_000
+  /** AC id → expiry of an optimistic ON that is still being confirmed; reads saying OFF do not override it until then. */
+  private readonly pendingOn = new Map<string, number>()
+  private static readonly PENDING_ON_MS = 30_000
   /** Generation per AC: a superseded background confirmation must not touch state. */
   private readonly confirmGeneration = new Map<string, number>()
   private saved: SavedSetup | null
@@ -358,15 +361,18 @@ export class HomeController {
     if (!this.lg) return
     const generation = this.confirmGeneration.get(ac.id) ?? 0
     const superseded = (): boolean => this.confirmGeneration.get(ac.id) !== generation
+    this.pendingOn.set(ac.id, Date.now() + HomeController.PENDING_ON_MS)
+    const release = (): void => { if (!superseded()) this.pendingOn.delete(ac.id) }
     let last: AcState | undefined
     for (let attempt = 0; attempt < 8; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 3000))
       if (superseded()) return
       last = await this.lg.getAcState(ac.id).catch(() => undefined) ?? last
       if (superseded()) return
-      if (last?.on) { this.authoritativeOff.delete(ac.id); console.info('LG confirm result=on'); return }
+      if (last?.on) { this.authoritativeOff.delete(ac.id); release(); console.info('LG confirm result=on'); return }
     }
     if (superseded()) return
+    release()
     if (last && !last.on) {
       this.authoritativeOff.set(ac.id, Date.now())
       ac.state = { ...last, on: false }
@@ -379,6 +385,8 @@ export class HomeController {
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
     // Right after LG said OFF, an ON read is probably stale and must not override it; later, an ON read
     // (e.g. turned on from the LG app) is authoritative and clears the marker.
+    const pendingUntil = this.pendingOn.get(ac.id)
+    if (pendingUntil !== undefined && Date.now() < pendingUntil && ac.state.online && !ac.state.on) ac.state = { ...ac.state, on: true }
     const since = this.authoritativeOff.get(ac.id)
     if (since !== undefined) {
       if (Date.now() - since < HomeController.STALE_WINDOW_MS || !(ac.state.online && ac.state.on)) ac.state = { ...ac.state, on: false }
@@ -428,6 +436,7 @@ export class HomeController {
               : { turbo: command.on }
       // Any newer AC command supersedes a running background confirmation for this AC.
       this.confirmGeneration.set(ac.id, (this.confirmGeneration.get(ac.id) ?? 0) + 1)
+      this.pendingOn.delete(ac.id)
       const deadlineController = patch.on === true ? new AbortController() : undefined
       const deadline = deadlineController?.signal
       const deadlineTimer = deadlineController ? setTimeout(() => deadlineController.abort(), 6000) : undefined
