@@ -257,8 +257,9 @@ export class SmartLifeCloud {
     let batch = this.statusBatches.get(homeId)
     // A batch that started before (or at) the command cannot confirm it: let it finish, then start a fresh one.
     while (batch && (this.batchStartedAt.get(homeId) ?? 0) <= sentAt) { await batch.catch(() => undefined); batch = this.statusBatches.get(homeId) }
+    let startedAt = this.batchStartedAt.get(homeId) ?? 0
     if (!batch) {
-      const startedAt = Date.now()
+      startedAt = Date.now()
       this.batchStartedAt.set(homeId, startedAt)
       batch = (async () => {
         const devices = await this.request(session, '/v1.0/m/life/ha/home/devices', { homeId })
@@ -274,8 +275,8 @@ export class SmartLifeCloud {
     }
     await batch
     const refreshed = this.statusCache.get(id)
-    // The fresh batch must have written a post-command entry for THIS device; an older entry cannot confirm.
-    if (!refreshed || refreshed.fetchedAt <= sentAt) throw new Error('Smart Life batched status missing device')
+    // Only an entry written by the batch we just awaited (or a later one) counts: never a pre-command or expired leftover.
+    if (!refreshed || refreshed.fetchedAt < startedAt || refreshed.fetchedAt <= sentAt) throw new Error('Smart Life batched status missing device')
     return refreshed.status
   }
 
