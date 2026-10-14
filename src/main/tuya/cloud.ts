@@ -274,7 +274,8 @@ export class SmartLifeCloud {
     }
     await batch
     const refreshed = this.statusCache.get(id)
-    if (!refreshed) throw new Error('Smart Life batched status missing device')
+    // The fresh batch must have written a post-command entry for THIS device; an older entry cannot confirm.
+    if (!refreshed || refreshed.fetchedAt <= sentAt) throw new Error('Smart Life batched status missing device')
     return refreshed.status
   }
 

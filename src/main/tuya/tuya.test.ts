@@ -314,6 +314,28 @@ describe('Smart Life QR flow', () => {
     results.forEach(status => expect(status).toMatchObject({ switch_1: true, switch_2: true, switch_3: true, switch_4: true }))
     expect(statusCalls).toBeGreaterThanOrEqual(2)
   })
+  it('fails confirmation when the fresh batch omits the device instead of reusing the pre-command entry', async () => {
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      if (statusCalls === 1) { await gate; return { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: true }] }] }) } }
+      return { ok: true, json: async () => ({ success: true, result: [] }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch)
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    const early = cloud.deviceStatus(session, 'sw')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await cloud.sendCommands(session, 'sw', [{ code: 'switch_1', value: true }])
+    await new Promise(resolve => setTimeout(resolve, 5))
+    const confirmation = cloud.deviceStatus(session, 'sw')
+    release()
+    expect(await early).toMatchObject({ switch_1: true })
+    await expect(confirmation).rejects.toThrow('missing device')
+  })
   it('takes online from ha/home/devices even when cached switch status says on', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
       { id: 'one', online: false, status: [{ code: 'switch_led', value: true }] }
