@@ -82,7 +82,7 @@ app.whenReady().then(() => {
     show: false,
     frame: false,
     resizable: false,
-    skipTaskbar: true,
+    skipTaskbar: false,
     autoHideMenuBar: true,
     backgroundMaterial: 'acrylic',
     roundedCorners: true,

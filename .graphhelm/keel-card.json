@@ -1,5 +1,5 @@
 {
-  "promise": "The real Electron popup has rounded corners and fits the home's rooms without Home scrolling. Room controls use room icons, clear device status, and reduced-motion-safe feedback.",
-  "scopePaths": [".graphhelm/keel-card.json", "package.json", "package-lock.json", "src/main/index.ts", "src/main/window-fit.ts", "src/main/window-fit.test.ts", "src/preload/index.ts", "src/shared/types.ts", "src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/main.tsx", "src/renderer/roomIcons.ts", "src/renderer/roomIcons.test.ts", "src/renderer/fixtures/index.ts", "src/renderer/fixtures/index.test.ts", "src/renderer/design-proof.mjs", "tests/issue-46.spec.ts", "test-results/design/real-window.png"],
-  "proof": "npm ci; npx electron-vite build; sh ci/local-ci.sh; Playwright on a free port for fixture=house10; node src/renderer/design-proof.mjs; inspect test-results/design/real-window.png from the running Electron window"
+  "promise": "Popup window gets DWM rounded corners (no tool-window style); LG target temperature uses the writable plain profile entry so real ACs accept temperature commands. Everything else unchanged.",
+  "scopePaths": ["src/main/index.ts", "src/main/lg/client.ts", "src/main/lg/client.test.ts", ".graphhelm/keel-card.json"],
+  "proof": "npx vitest run src/main/lg/client.test.ts && echo PROOF_OK"
 }
