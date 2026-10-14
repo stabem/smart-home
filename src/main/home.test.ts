@@ -246,6 +246,22 @@ describe('main process setup and control', () => {
       await vi.advanceTimersByTimeAsync(25000)
       const rooms = await home.rooms()
       expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
+      // An authoritative ON read (turned on elsewhere) clears the off marker once the stale window has passed.
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      await vi.advanceTimersByTimeAsync(16000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // A superseded background loop must not mark the AC off after a newer press confirmed ON.
+      lg.setAc.mockResolvedValue(undefined)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      const first = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await first
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      const second = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(2100)
+      await second
+      await vi.advanceTimersByTimeAsync(30000)
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
     } finally { vi.useRealTimers(); vi.restoreAllMocks() }
   })
 

@@ -115,7 +115,11 @@ function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boo
 }
 
 export class HomeController {
-  private readonly authoritativeOff = new Set<string>()
+  /** AC id → when LG last said it is off (2304 or confirmed OFF). Reads within STALE_WINDOW_MS cannot override it. */
+  private readonly authoritativeOff = new Map<string, number>()
+  private static readonly STALE_WINDOW_MS = 15_000
+  /** Generation per AC: a superseded background confirmation must not touch state. */
+  private readonly confirmGeneration = new Map<string, number>()
   private saved: SavedSetup | null
   private draft: SavedSetup | null = null
   private qrToken: string | null = null
@@ -352,14 +356,20 @@ export class HomeController {
   /** Background confirmation after POWER_ON: reads every 3 s for up to 24 s; only an explicit, final POWER_OFF marks the AC off. */
   private async confirmPowerOnLater(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
+    const generation = (this.confirmGeneration.get(ac.id) ?? 0) + 1
+    this.confirmGeneration.set(ac.id, generation)
+    const superseded = (): boolean => this.confirmGeneration.get(ac.id) !== generation
     let last: AcState | undefined
     for (let attempt = 0; attempt < 8; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 3000))
+      if (superseded()) return
       last = await this.lg.getAcState(ac.id).catch(() => undefined) ?? last
+      if (superseded()) return
       if (last?.on) { this.authoritativeOff.delete(ac.id); console.info('LG confirm result=on'); return }
     }
+    if (superseded()) return
     if (last && !last.on) {
-      this.authoritativeOff.add(ac.id)
+      this.authoritativeOff.set(ac.id, Date.now())
       ac.state = { ...last, on: false }
       console.info('LG confirm result=off')
     } else console.info('LG confirm result=unknown')
@@ -368,7 +378,13 @@ export class HomeController {
   private async acState(ac: AirConditioner): Promise<void> {
     if (!this.lg) return
     ac.state = await this.lg.getAcState(ac.id).catch(() => offlineAc)
-    if (this.authoritativeOff.has(ac.id)) ac.state = { ...ac.state, on: false }
+    // Right after LG said OFF, an ON read is probably stale and must not override it; later, an ON read
+    // (e.g. turned on from the LG app) is authoritative and clears the marker.
+    const since = this.authoritativeOff.get(ac.id)
+    if (since !== undefined) {
+      if (Date.now() - since < HomeController.STALE_WINDOW_MS || !(ac.state.online && ac.state.on)) ac.state = { ...ac.state, on: false }
+      else this.authoritativeOff.delete(ac.id)
+    }
   }
 
   async command(command: unknown): Promise<void | { ok: boolean; state: AcState; error?: string }> {
@@ -444,7 +460,7 @@ export class HomeController {
         code = /^LG API request failed \(\d{3}\): (2304|2207)(?::|\b)/.exec(message)?.[1] ?? 'other'
         errorMessage = code === '2304' ? 'O ar está desligado. Ligue primeiro.' : 'Ar não respondeu. Tente novamente.'
         if (code === '2304') {
-          this.authoritativeOff.add(ac.id)
+          this.authoritativeOff.set(ac.id, Date.now())
           ac.state = { ...ac.state, on: false, online: true }
           console.info(`LG control result=failed kind=${command.kind} code=2304`)
           if (deadlineTimer) clearTimeout(deadlineTimer)
