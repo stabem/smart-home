@@ -1,4 +1,4 @@
-import type { AirConditioner, DeviceCommand, Room, SetupStatus } from '../shared/types'
+import type { AirConditioner, DeviceCommand, Light, Room, SetupStatus } from '../shared/types'
 import { LgClient } from './lg/client'
 import { SetupStore, type SavedSetup } from './store'
 import { app } from 'electron'
@@ -181,25 +181,31 @@ export class HomeController {
     ]))
     const groups = this.groups(rooms)
     if (this.saved.syncGuard !== false) await this.reapplyDrift(rooms, groups)
+    const singles = rooms.flatMap(room => room.lights.map(light => ({ ...light, state: { ...light.state } })))
     const grouped = applyLightGroups(rooms, groups, this.groupFailures)
-    void this.writeInventory(grouped, groups)
+    void this.writeInventory(grouped, groups, singles)
     return grouped
   }
 
   /** Human-readable house inventory (names, rooms, groups, state) for support. Never keys or tokens. */
-  private async writeInventory(rooms: Room[], groups: LightGroup[]): Promise<void> {
+  private async writeInventory(rooms: Room[], groups: LightGroup[], ungrouped: Light[]): Promise<void> {
     const devices = new Map(this.saved?.homes.flatMap(home => home.devices).map(device => [device.id, device]) ?? [])
+    const singles = new Map(ungrouped.map(light => [light.id, light]))
+    const path = (state: LightState): string => state.viaCloud ? 'nuvem' : state.online ? 'wifi' : 'offline'
     const lines = [`# Casa — inventário (${new Date().toLocaleString('pt-BR')})`, '']
     for (const room of rooms) {
       lines.push(`## ${room.name}`)
       for (const light of room.lights) {
         const device = devices.get(light.id.split(':')[0])
         const kind = light.memberIds ? `grupo de ${light.memberIds.length}` : device?.category === 'dj' ? 'lâmpada' : 'interruptor'
-        const where = light.state.viaCloud ? 'nuvem' : light.state.online ? 'wifi' : 'offline'
-        lines.push(`- ${light.name} [${kind}] id=${light.id} smartlife="${device?.name ?? '?'}" sala-smartlife="${device?.roomName ?? '?'}" ${light.state.on ? 'ligada' : 'desligada'} via ${where}`)
-        for (const member of light.memberIds ?? []) lines.push(`    - membro ${member} smartlife="${devices.get(member.split(':')[0])?.name ?? '?'}"`)
+        lines.push(`- ${light.name} [${kind}] id=${light.id} smartlife="${device?.name ?? '?'}" sala-smartlife="${device?.roomName ?? '?'}" ${light.state.on ? 'ligada' : 'desligada'} via ${path(light.state)}`)
+        for (const member of light.memberIds ?? []) {
+          const single = singles.get(member)
+          const device = devices.get(member.split(':')[0])
+          lines.push(`    - membro ${member} smartlife="${device?.name ?? '?'}" sala-smartlife="${device?.roomName ?? '?'}" ${single?.state.on ? 'ligada' : 'desligada'} via ${single ? path(single.state) : '?'}`)
+        }
       }
-      for (const ac of room.acs) lines.push(`- ${ac.name} [ar] id=${ac.id} ${ac.state.online ? 'online' : 'offline'}`)
+      for (const ac of room.acs) lines.push(`- ${ac.name} [ar] id=${ac.id} ${ac.state.online ? 'online via nuvem (LG ThinQ)' : 'offline'}`)
       lines.push('')
     }
     lines.push('## Grupos', ...groups.map(group => `- ${group.name} (${group.roomId}): ${group.memberIds.join(', ')}`))

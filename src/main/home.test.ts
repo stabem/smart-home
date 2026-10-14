@@ -66,13 +66,14 @@ describe('main process setup and control', () => {
     expect(peak).toBe(1)
   })
   it('writes a secret-free inventory next to the encrypted setup', async () => {
-    const { home } = harness({ homes: trackHomes, acs: [], lgPat: 'secret-pat', smartLifeSession: session } as SavedSetup)
+    const { home } = harness({ homes: trackHomes, acs: [{ id: 'ac-1', name: 'Ar Office' }], acRoomIds: { 'ac-1': 'office' }, lgPat: 'secret-pat', smartLifeSession: session } as SavedSetup)
     await home.rooms()
     await new Promise(resolve => setTimeout(resolve, 0))
     const [path, text] = inventory.writes.at(-1) ?? ['', '']
     expect(path).toMatch(/inventario\.md$/)
     expect(text).toContain('Trilho do Office')
-    expect(text).toContain('smartlife="Office_1"')
+    expect(text).toMatch(/membro bulb-1 smartlife="Office_1" sala-smartlife="Office" (ligada|desligada) via (wifi|nuvem|offline)/)
+    expect(text).toMatch(/\[ar\] id=ac-1 online via nuvem/)
     expect(text).not.toMatch(/fixture-key|secret-pat|fake/)
   })
   it('accepts quantized group read-backs without resending or reporting failure', async () => {
