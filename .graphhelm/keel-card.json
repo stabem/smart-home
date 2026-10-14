@@ -1,5 +1,5 @@
 {
-  "promise": "AC state reads and control results are logged (redacted); LG 2304 becomes 'O ar está desligado. Ligue primeiro.'; POWER_ON is confirmed by re-reading state (3×2 s) or rolled back with 'O ar não ligou'. Nothing else changes.",
-  "scopePaths": ["src/main/lg/client.ts", "src/main/home.ts", "src/main/home.test.ts", "src/renderer/App.tsx", ".graphhelm/keel-card.json"],
-  "proof": "npx vitest run src/main/home.test.ts && echo PROOF_OK"
+  "promise": "IPC errors preserve user instructions, AC control returns observed state on every outcome, POWER_ON confirmation ends within six seconds, and LG logs never expose response data or thrown messages.",
+  "scopePaths": [".graphhelm/keel-card.json", "src/shared/types.ts", "src/preload/index.ts", "src/preload/index.test.ts", "src/main/lg/client.ts", "src/main/lg/client.test.ts", "src/main/home.ts", "src/main/home.test.ts", "src/renderer/App.tsx"],
+  "proof": "npx vitest run src/preload/index.test.ts src/main/home.test.ts src/main/lg/client.test.ts && sh ci/local-ci.sh"
 }

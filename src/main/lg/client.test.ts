@@ -19,6 +19,20 @@ function mockFetch(responses: Record<string, unknown>): typeof fetch {
 }
 
 describe('ThinQ AC client', () => {
+  it('logs only known state enums when LG returns a secret in mode or fan', async () => {
+    const secret = 'SENTINEL-LG-SECRET'
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      const fetcher = mockFetch({
+        '/devices/ac-1/profile': { property: { airFlow: { windStrength: { mode: ['r'] } } } },
+        '/devices/ac-1/state': { operation: { airConOperationMode: 'POWER_ON' }, temperature: { targetTemperatureC: 23 },
+          airConJobMode: { currentJobMode: secret }, airFlow: { windStrength: secret } }
+      })
+      await new LgClient('test-token', 'BR', fetcher).getAcState('ac-1')
+      expect(log).toHaveBeenCalledWith('LG state operation=POWER_ON mode=other fan=other')
+      expect(JSON.stringify(log.mock.calls)).not.toContain(secret)
+    } finally { log.mockRestore() }
+  })
   it('lists only ACs and maps their state', async () => {
     const fetcher = mockFetch({
       '/devices/ac-1/profile': profile,

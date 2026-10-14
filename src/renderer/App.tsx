@@ -200,8 +200,11 @@ export function App({ api }: { api: SmartHomeApi }) {
           next = optimistic.current.get(key)!
         }
         try {
-          await api.sendCommand(next.command)
-          baseRooms.current = applyCommand(baseRooms.current, next.command)
+          const result = await api.sendCommand(next.command)
+          if (result) {
+            baseRooms.current = baseRooms.current.map(room => ({ ...room, acs: room.acs.map(ac => ac.id === next.command.deviceId ? { ...ac, state: result.state } : ac) }))
+          } else baseRooms.current = applyCommand(baseRooms.current, next.command)
+          if (result && !result.ok) throw new Error(result.error)
           if (optimistic.current.get(key)?.version === next.version) optimistic.current.delete(key)
         } catch (cause) {
           if (optimistic.current.get(key)?.version === next.version) {
@@ -213,7 +216,7 @@ export function App({ api }: { api: SmartHomeApi }) {
         setPending([...optimistic.current.keys()])
       }
       sending.current.delete(key)
-      void refresh().catch(() => undefined)
+      if (!value.kind.startsWith('ac.')) void refresh().catch(() => undefined)
     })()
   }
   useLayoutEffect(() => { if (lastIntent.current) { performance.mark(`${lastIntent.current}:paint-ready`); lastIntent.current = null } }, [rooms])

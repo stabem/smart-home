@@ -82,7 +82,7 @@ export class LgClient {
     this.baseUrl = `https://api-${region(country)}.lgthinq.com`
   }
 
-  private async request(path: string, body?: Json): Promise<unknown> {
+  private async request(path: string, body?: Json, signal?: AbortSignal): Promise<unknown> {
     const response = await this.fetcher(`${this.baseUrl}/${path}`, {
       method: body ? 'POST' : 'GET',
       headers: {
@@ -95,7 +95,7 @@ export class LgClient {
         ...(body ? { 'content-type': 'application/json', 'x-conditional-control': 'true' } : {})
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(4000)
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(4000)]) : AbortSignal.timeout(4000)
     })
     const payload = object(await response.json().catch(() => ({})))
     if (!response.ok || payload.error) {
@@ -112,12 +112,12 @@ export class LgClient {
     return payload.response
   }
 
-  async getAcProfile(id: string): Promise<Json> {
-    return object(await this.request(`devices/${encodeURIComponent(id)}/profile`))
+  async getAcProfile(id: string, signal?: AbortSignal): Promise<Json> {
+    return object(await this.request(`devices/${encodeURIComponent(id)}/profile`, undefined, signal))
   }
 
-  async getAcState(id: string): Promise<LgAcState> {
-    const report = object(await this.request(`devices/${encodeURIComponent(id)}/state`))
+  async getAcState(id: string, signal?: AbortSignal): Promise<LgAcState> {
+    const report = object(await this.request(`devices/${encodeURIComponent(id)}/state`, undefined, signal))
     const celsius = Array.isArray(report.temperatureInUnits)
       ? report.temperatureInUnits.find(item => object(item).unit === 'C') : undefined
     const temp = celsius ? object(celsius) : object(report.temperature)
@@ -127,9 +127,9 @@ export class LgClient {
     if (target === undefined) throw new Error('LG AC target temperature missing')
     const mode = string(property(report, 'airConJobMode', 'currentJobMode'))
     const powerSave = property(report, 'powerSave', 'powerSaveEnabled')
-    const profile = report.airFlow ? await this.getAcProfile(id).catch(() => null) : null
+    const profile = report.airFlow ? await this.getAcProfile(id, signal).catch(() => null) : null
     const wind = profile ? string(property(report, 'airFlow', fanKey(profile))) : undefined
-    console.info(`LG state id=${id.slice(0, 8)} operation=${on} mode=${mode ?? '-'} fan=${wind ?? '-'} target=${target}`)
+    console.info(`LG state operation=${on} mode=${mode && Object.hasOwn(modeNames, mode) ? mode : 'other'} fan=${wind && Object.hasOwn(fanNames, wind) ? wind : 'other'}`)
     return {
       on: on === 'POWER_ON',
       currentTemperature: number(temp.currentTemperatureC ?? temp.currentTemperature),
@@ -157,7 +157,7 @@ export class LgClient {
     }))
   }
 
-  async setAc(id: string, patch: AcPatch): Promise<void> {
+  async setAc(id: string, patch: AcPatch, signal?: AbortSignal): Promise<void> {
     if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('LG AC patch value invalid')
     if (Object.keys(patch).length === 0) throw new Error('LG AC patch empty')
     for (const [key, value] of Object.entries(patch)) {
@@ -166,7 +166,7 @@ export class LgClient {
           : key === 'mode' || key === 'fan' ? typeof value === 'string' : false
       if (!valid) throw new Error('LG AC patch value invalid')
     }
-    const profile = await this.getAcProfile(id)
+    const profile = await this.getAcProfile(id, signal)
     const controls: Json[] = []
     const add = (group: string, key: string, value: string | number | boolean): void => {
       validateValue(capability(profile, group, key), value)
@@ -206,6 +206,6 @@ export class LgClient {
     }
     if (patch.powerSave !== undefined) add('powerSave', 'powerSaveEnabled', patch.powerSave)
     if (controls.length !== Object.keys(patch).length) throw new Error('LG AC patch has unsupported fields')
-    for (const control of controls) await this.request(`devices/${encodeURIComponent(id)}/control`, control)
+    for (const control of controls) await this.request(`devices/${encodeURIComponent(id)}/control`, control, signal)
   }
 }
