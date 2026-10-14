@@ -141,6 +141,9 @@ export class SmartLifeCloud {
   /** When a command was last sent per device: status fetched before that is stale for confirmation. */
   private readonly commandAt = new Map<string, number>()
   private readonly batchStartedAt = new Map<string, number>()
+  /** Monotonic ordering for commands vs status batches: Date.now() is not precise enough (same-millisecond). */
+  private seq = 0
+  private nextSeq(): number { return ++this.seq }
   private readonly onlineCache = new Map<string, boolean>()
   private readonly statusBatches = new Map<string, Promise<void>>()
   onSessionChanged?: () => void
@@ -164,8 +167,8 @@ export class SmartLifeCloud {
     return Object.fromEntries(status.map(value => { const item = record(value); return [string(item.code), item.value] }))
   }
 
-  /** `fetchedAt` is the START of the batch that produced the entry: data cannot be newer than the request that fetched it. */
-  private rememberStatus(id: string, status: unknown, fetchedAt = Date.now()): void {
+  /** `fetchedAt` is the sequence number of the batch that produced the entry: data cannot be newer than the request that fetched it. */
+  private rememberStatus(id: string, status: unknown, fetchedAt = this.nextSeq()): void {
     const values = this.statusEntries(status)
     if (values) this.statusCache.set(id, { status: values, expiresAt: Date.now() + 10_000, fetchedAt })
   }
@@ -259,7 +262,7 @@ export class SmartLifeCloud {
     while (batch && (this.batchStartedAt.get(homeId) ?? 0) <= sentAt) { await batch.catch(() => undefined); batch = this.statusBatches.get(homeId) }
     let startedAt = this.batchStartedAt.get(homeId) ?? 0
     if (!batch) {
-      startedAt = Date.now()
+      startedAt = this.nextSeq()
       this.batchStartedAt.set(homeId, startedAt)
       batch = (async () => {
         const devices = await this.request(session, '/v1.0/m/life/ha/home/devices', { homeId })
@@ -290,7 +293,7 @@ export class SmartLifeCloud {
       throw error
     }
     this.statusCache.delete(id)
-    this.commandAt.set(id, Date.now())
+    this.commandAt.set(id, this.nextSeq())
   }
 
   async listHomes(session: SmartLifeSession): Promise<SmartLifeHome[]> {

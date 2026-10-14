@@ -356,6 +356,19 @@ describe('Smart Life QR flow', () => {
       await expect(cloud.deviceStatus(session, 'sw')).rejects.toThrow('missing device')
     } finally { vi.restoreAllMocks() }
   })
+  it('confirms from a fresh batch that starts in the same millisecond as the command', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(100_000)
+    try {
+      const fetcher = vi.fn(async (url: string) => String(url).includes('/commands')
+        ? { ok: true, json: async () => ({ success: true, result: true }) }
+        : { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: true }] }] }) })
+      const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => 100_000, async () => {}, () => 0))
+      const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: 100_000 + 3_600_000, uid: 'u', terminalId: 't' }
+      cloud.registerHomes([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+      await cloud.sendCommands(session, 'sw', [{ code: 'switch_1', value: true }])
+      expect(await cloud.deviceStatus(session, 'sw')).toEqual({ switch_1: true })
+    } finally { vi.restoreAllMocks() }
+  })
   it('takes online from ha/home/devices even when cached switch status says on', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
       { id: 'one', online: false, status: [{ code: 'switch_led', value: true }] }
