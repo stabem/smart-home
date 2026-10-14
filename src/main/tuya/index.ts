@@ -77,6 +77,7 @@ export class TuyaService {
     this.homes = await this.cloud.listHomes(session)
     this.observedMaps.clear()
     this.offlineIds.clear()
+    for (const home of this.homes) for (const device of home.devices) if (device.online === false) this.offlineIds.add(device.id)
     for (const home of this.homes) for (const device of home.devices) device.ip = undefined
     await this.resolveAddresses()
     this.startRefresh()
@@ -89,6 +90,7 @@ export class TuyaService {
     this.homes = homes
     this.observedMaps.clear()
     this.offlineIds.clear()
+    for (const home of homes) for (const device of home.devices) if (device.online === false) this.offlineIds.add(device.id)
     this.cloud.registerHomes?.(homes)
     let scrubbed = false
     for (const home of homes) for (const device of home.devices) if (device.ip && !isLanIp(device.ip)) {
@@ -130,7 +132,7 @@ export class TuyaService {
   }
 
   private async cloudOnline(id: string): Promise<boolean | undefined> {
-    if (!this.session || !this.cloud.deviceStatus) return undefined
+    if (!this.session || !this.cloud.deviceStatus) return this.offlineIds.has(id) || this.cloud.deviceOnline?.(id) === false ? false : undefined
     try {
       await this.cloud.deviceStatus(this.session, id)
       const online = this.cloud.deviceOnline?.(id)
@@ -138,9 +140,10 @@ export class TuyaService {
       if (online === true) this.offlineIds.delete(id)
       const stored = this.homes.flatMap(home => home.devices).find(device => device.id === id)
       if (stored && typeof online === 'boolean') stored.online = online
-      return online
+      return online ?? (this.offlineIds.has(id) ? false : undefined)
     } catch (error) {
       if (this.isOfflineError(error)) { this.offlineIds.add(id); return false }
+      if (this.cloud.deviceOnline?.(id) === false) this.offlineIds.add(id)
       return this.offlineIds.has(id) ? false : undefined
     }
   }
@@ -398,6 +401,7 @@ export class TuyaService {
     } catch (error) {
       this.logFailure(`${id} step=cloud-read`, this.devices.get(id), error)
       if (this.isOfflineError(error)) { this.offlineIds.add(id); return this.offlineState() }
+      if (this.offlineIds.has(id) || this.cloud.deviceOnline?.(id) === false) return this.offlineState()
       if (error instanceof SmartLifeRateLimitError || this.cloud.isRateLimited?.()) {
         const cached = this.lastStates.get(dp === 1 ? id : `${id}::${dp}`)
         return { ...(cached ?? { on: false, online: false }), stale: true }

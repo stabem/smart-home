@@ -404,6 +404,28 @@ describe('typed light service', () => {
     expect(cloud.sendCommands).not.toHaveBeenCalled()
   })
 
+  it('keeps saved cloud-offline devices off LAN when status fails until cloud confirms online', async () => {
+    const cloud = { registerHomes: vi.fn(), deviceStatus: vi.fn().mockRejectedValue(new Error('status unavailable')),
+      deviceOnline: vi.fn().mockReturnValue(undefined), sendCommands: vi.fn() }
+    const lan = { request: vi.fn().mockResolvedValue({ '1': true }) }
+    const scan = vi.fn().mockResolvedValue(new Map())
+    const probe = vi.fn()
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, lan as unknown as TuyaLanClient, scan, probe)
+    await service.restore([{ id: 'home', name: 'Casa', devices: [
+      { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home', ip: device.ip, online: false }
+    ] }], session)
+    expect(await service.getState('light-1')).toEqual({ on: false, online: false, reason: 'sem energia ou fora da rede' })
+    expect(await service.setLight('light-1', { on: true })).toEqual({ on: false, online: false, reason: 'sem energia ou fora da rede' })
+    expect(lan.request).not.toHaveBeenCalled()
+    expect(probe).not.toHaveBeenCalled()
+    expect(cloud.sendCommands).not.toHaveBeenCalled()
+
+    cloud.deviceStatus.mockResolvedValue({ switch_led: true })
+    cloud.deviceOnline.mockReturnValue(true)
+    expect(await service.getState('light-1')).toEqual({ on: true, online: true })
+    expect(lan.request).toHaveBeenCalledOnce()
+  })
+
   it('treats cloud 2001 as offline without retrying a rejected bundle', async () => {
     const cloud = { registerHomes: vi.fn(), deviceStatus: vi.fn().mockResolvedValue({ switch_led: true }),
       sendCommands: vi.fn().mockRejectedValue(new Error('Smart Life device request rejected code=2001 msg=device is offline')) }
