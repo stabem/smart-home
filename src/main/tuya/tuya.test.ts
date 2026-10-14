@@ -379,7 +379,9 @@ describe('Smart Life QR flow', () => {
     const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => Date.now(), async () => {}, () => 0))
     const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
     const service = new TuyaService(cloud, {} as TuyaLanClient, vi.fn().mockResolvedValue(new Map()))
-    vi.spyOn(cloud, 'listHomes').mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    const homes = [{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }]
+    vi.spyOn(cloud, 'listHomes').mockResolvedValue(homes)
+    cloud.registerHomes(homes)
     await service.discover(session)
     expect(await service.setLight('sw', { on: true })).toMatchObject({ on: true, online: true })
     expect(statusCalls).toBe(2)
