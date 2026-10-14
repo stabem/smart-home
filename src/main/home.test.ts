@@ -83,7 +83,7 @@ describe('main process setup and control', () => {
     tuya.setLight.mockImplementation(async (_lightId: string, patch: Record<string, unknown>) => ({ on: true, online: true, viaCloud: true, unconfirmed: true, ...patch }))
     await home.command({ kind: 'light.power', deviceId: id, on: true })
     expect(tuya.setLight).toHaveBeenCalledTimes(4)   // no retries, no 'Falha em'
-    tuya.getState.mockResolvedValue({ on: false, online: true, viaCloud: true, unconfirmed: true })
+    tuya.getState.mockResolvedValue({ on: false, online: true, viaCloud: true, unconfirmed: true } as unknown as { on: boolean; online: boolean })
     tuya.setLight.mockClear()
     await home.rooms()                                 // sync guard must not re-apply to unconfirmed members
     expect(tuya.setLight).not.toHaveBeenCalled()
