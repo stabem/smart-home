@@ -1,5 +1,5 @@
 {
-  "promise": "Popup window gets DWM rounded corners (no tool-window style); LG target temperature uses the writable plain profile entry so real ACs accept temperature commands. Everything else unchanged.",
-  "scopePaths": ["src/main/index.ts", "src/main/lg/client.ts", "src/main/lg/client.test.ts", ".graphhelm/keel-card.json"],
-  "proof": "npx vitest run src/main/lg/client.test.ts && echo PROOF_OK"
+  "promise": "The Control Center shows mockup-paced room, control, pending, and discovery motion without changing approved journeys or device command behavior.",
+  "scopePaths": ["src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/fixtures/index.ts", "src/renderer/discovery-orbit.ts", "src/renderer/discovery-orbit.test.ts", "src/renderer/interaction-proof.mjs", "test-results/issue-50/interaction.webm", "docs/DESIGN.md", ".graphhelm/keel-card.json"],
+  "proof": "node src/renderer/interaction-proof.mjs (test-results/issue-50/interaction.webm, latency=1500 plus rotating pending copy at 8500); node src/renderer/design-proof.mjs; npx playwright test on a free port; sh ci/local-ci.sh"
 }

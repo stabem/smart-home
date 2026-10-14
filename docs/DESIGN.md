@@ -31,3 +31,11 @@ The tray uses the visual language of macOS Control Center: one frosted sheet ove
 - Motion keeps the short room transition, module layout and custom-control expansion. Reduced motion removes those effects. Idle home schedules no animation frames.
 - Setup retains LG and Tuya status, User Code, QR action, discovery, room assignment, group editing, and save. No secret value appears in the UI.
 - Use the fixture on a free port. Capture light and dark home, Office room, AC on, and setup at 420 × 640. Inspect every capture and the side-by-side composite with the real reference. Block on overlap, duplicate bulb icons, elements outside modules, misaligned baselines, or axe serious/critical findings.
+
+## Motion
+
+- Keep the Control Center glass, color and compact modules. Motion uses `cubic-bezier(.22, 1, .36, 1)`: tiles enter over 500 ms with 60 ms between them; room modules enter with 80 ms between them. Text changes fade and move 6 px over 500 ms.
+- A light turning on pops its control for 380 ms and blooms the warm light pool for 600 ms. Turning off settles in 250 ms. A group turning on sends a 450 ms highlight across its brightness fill.
+- Pending commands pulse a ring around the control every 1.6 s. After 3 s, the status rotates honest waiting copy every 3.5 s. Success stops the pulse; failure restores the confirmed state and shows the error.
+- Discovery scales in a central house card over 900 ms, reveals room chips 90 ms apart on a slow orbit, and marks found chips with a 170 ms hit sequence. Four phase bars show progress. The stage exits in 350 ms; the device list enters in 600 ms.
+- Reduced motion removes the orbit, stagger, pulse, and scale transitions. The orbit schedules no frames outside active discovery.
