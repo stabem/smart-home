@@ -174,17 +174,17 @@ export class LgClient {
     if (patch.on !== undefined) add('operation', 'airConOperationMode', patch.on ? 'POWER_ON' : 'POWER_OFF')
     if (patch.targetTemperature !== undefined) {
       const properties = object(profile.property ?? profile)
+      const temperature = object(properties.temperature)
+      const writable = (entry: Json): boolean => Array.isArray(entry.mode) && entry.mode.includes('w')
+      const plainKey = 'targetTemperatureC' in temperature ? 'targetTemperatureC' : 'targetTemperature'
+      const plain = object(temperature[plainKey])
       const inUnits = properties.temperatureInUnits
       const celsius = Array.isArray(inUnits) ? inUnits.find(item => object(item).unit === 'C') : undefined
-      if (celsius) {
-        const entry = object(object(celsius).targetTemperature)
-        if (!Array.isArray(entry.mode) || !entry.mode.includes('w')) throw new Error('LG AC control unavailable: temperature.targetTemperature')
-        validateValue(entry, patch.targetTemperature)
-      } else {
-        const temperature = object(properties.temperature)
-        const key = 'targetTemperatureC' in temperature ? 'targetTemperatureC' : 'targetTemperature'
-        validateValue(capability(profile, 'temperature', key), patch.targetTemperature)
-      }
+      const unitEntry = celsius ? object(object(celsius).targetTemperature) : undefined
+      // Real profiles list targetTemperature twice; the plain one is the writable control.
+      if (writable(plain)) validateValue(plain, patch.targetTemperature)
+      else if (unitEntry && writable(unitEntry)) validateValue(unitEntry, patch.targetTemperature)
+      else throw new Error('LG AC control unavailable: temperature.targetTemperature')
       controls.push({ temperature: { targetTemperature: patch.targetTemperature, unit: 'C' } })
     }
     if (patch.mode !== undefined) {

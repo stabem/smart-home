@@ -197,4 +197,13 @@ describe('ThinQ AC client', () => {
       .rejects.toThrow('LG API request failed (400): 2207: Invalid command [redacted]')
     expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[1][1]?.body))).toEqual({ temperature: { targetTemperature: 18, unit: 'C' } })
   })
+  it('prefers the writable plain targetTemperature when temperatureInUnits lists it read-only (real profile)', async () => {
+    const real = { property: {
+      temperature: { targetTemperature: { type: 'range', mode: ['r', 'w'], value: { r: { min: 16, max: 30, step: 1 }, w: { min: 16, max: 30, step: 1 } } } },
+      temperatureInUnits: [{ unit: 'C', targetTemperature: { type: 'range', mode: ['r'], value: { r: { min: 16, max: 30, step: 1 } } } }]
+    } }
+    const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(new URL(url).pathname.endsWith('/profile') ? { response: real } : { response: {} }), { status: 200 })) as unknown as typeof fetch
+    await new LgClient('test-token', 'BR', fetcher).setAc('ac-1', { targetTemperature: 20 })
+    expect(JSON.parse(String(vi.mocked(fetcher).mock.calls[1][1]?.body))).toEqual({ temperature: { targetTemperature: 20, unit: 'C' } })
+  })
 })
