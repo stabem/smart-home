@@ -16,3 +16,5 @@ const api = fixture === 'house' || fixture === 'house10' || fixture === 'empty'
   : window.api ?? createFixtureApi('house')
 
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App api={api} /></React.StrictMode>)
+
+document.addEventListener('visibilitychange', () => document.body.classList.toggle('hidden', document.hidden))
