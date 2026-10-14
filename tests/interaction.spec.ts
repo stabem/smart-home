@@ -1,6 +1,38 @@
 import { test, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 
+test('LG 2304 turns the AC card off before a 4 s repair read and ignores stale ON', async ({ page }) => {
+  await page.addInitScript(() => {
+    const room = { id: 'office', name: 'Office', lights: [], acs: [{ id: 'ac-1', name: 'Ar Office', state: { on: true, online: true, targetTemperature: 23 } }] }
+    let reads = 0
+    let completedReads = 0
+    Object.assign(window, { acReads: () => reads, acReadsDone: () => completedReads })
+    Object.assign(window, { api: {
+      getRooms: async () => {
+        reads++
+        if (reads > 1) await new Promise(resolve => setTimeout(resolve, 4000))
+        completedReads++
+        return [structuredClone(room)]
+      },
+      sendCommand: async () => ({ ok: false, state: { on: false, online: true, targetTemperature: 23 }, error: 'O ar está desligado. Ligue primeiro.' }),
+      getSetupStatus: async () => ({ configured: true, lgTokenConfigured: true, tuyaKeysConfigured: false, smartLifeUserCodeConfigured: false, smartLifeConnected: false }),
+      getLaunchAtLogin: async () => false
+    } })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Abrir Office' }).click()
+  await expect(page.getByRole('button', { name: 'Desligar ar' })).toBeVisible()
+  await page.getByRole('button', { name: 'Aumentar' }).click()
+  await expect(page.getByRole('button', { name: 'Ligar ar' })).toBeVisible({ timeout: 1000 })
+  await expect(page.getByRole('alert').getByText('O ar está desligado. Ligue primeiro.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { acReads: () => number }).acReads())).toBeGreaterThanOrEqual(3)
+  await expect.poll(() => page.evaluate(() => {
+    const status = window as unknown as { acReads: () => number; acReadsDone: () => number }
+    return status.acReadsDone() === status.acReads()
+  }), { timeout: 6000 }).toBe(true)
+  await expect(page.getByRole('button', { name: 'Ligar ar' })).toBeVisible()
+})
+
 test('a delayed failed light command paints immediately and rolls back', async ({ page }) => {
   await page.goto('/?fixture=house&latency=1500&failure=always')
   await page.getByRole('button', { name: 'Abrir Quarto' }).click()
