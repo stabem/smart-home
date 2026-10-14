@@ -120,7 +120,8 @@ export class HomeController {
   private static readonly STALE_WINDOW_MS = 15_000
   /** AC id → expiry of an optimistic ON that is still being confirmed; reads saying OFF do not override it until then. */
   private readonly pendingOn = new Map<string, number>()
-  private static readonly PENDING_ON_MS = 30_000
+  /** Safety cap only: the loop (8 × (3 s wait + ≤4 s read) ≈ 56 s) releases the marker itself. */
+  private static readonly PENDING_ON_MS = 90_000
   /** Generation per AC: a superseded background confirmation must not touch state. */
   private readonly confirmGeneration = new Map<string, number>()
   private saved: SavedSetup | null

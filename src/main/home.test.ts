@@ -245,6 +245,14 @@ describe('main process setup and control', () => {
       await expect(slow).resolves.toMatchObject({ ok: true, state: { on: true } })
       // An immediate refresh while LG still lags (reads OFF) must keep the optimistic ON.
       expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      // Slow reads (4 s each) stretch the loop to ~56 s; the optimistic ON must hold until the loop itself ends.
+      lg.getAcState.mockImplementation(() => new Promise(resolve => setTimeout(() => resolve({ on: false, targetTemperature: 23, online: true }), 4000)))
+      await vi.advanceTimersByTimeAsync(40000)
+      const midway = home.rooms()
+      await vi.advanceTimersByTimeAsync(4000)
+      expect((await midway).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
+      await vi.advanceTimersByTimeAsync(30000)
+      lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
       await vi.advanceTimersByTimeAsync(25000)
       const rooms = await home.rooms()
       expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
