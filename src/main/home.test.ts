@@ -5,6 +5,10 @@ import { SmartLifeCloud, TuyaService, type SmartLifeHome, type SmartLifeSession 
 import type { TuyaLanClient } from './tuya'
 import type { LgClient } from './lg/client'
 
+const inventory = vi.hoisted(() => ({ writes: [] as Array<[string, string]> }))
+vi.mock('electron', () => ({ app: { getPath: () => 'C:/userData' }, safeStorage: { isEncryptionAvailable: () => false } }))
+vi.mock('node:fs/promises', () => ({ writeFile: async (path: string, data: string) => { inventory.writes.push([path, data]) } }))
+
 const homes: SmartLifeHome[] = [{ id: 'home-1', name: 'Casa', devices: [
   { id: 'light-1', name: 'Luz', category: 'dj', localKey: 'fake-key', homeId: 'home-1', roomId: 'r1', roomName: 'Sala de estar', version: '3.4', ip: '192.0.2.2' },
   { id: 'light-2', name: 'Luz office', category: 'kg', localKey: 'fake-key-2', homeId: 'home-1', roomId: 'r2', roomName: 'Office', version: '3.3', ip: '192.0.2.3' }
@@ -60,6 +64,16 @@ describe('main process setup and control', () => {
     await home.command({ kind: 'light.power', deviceId: id, on: true })
     expect(calls).toEqual(['bulb-3', 'bulb-1', 'bulb-2', 'bulb-2', 'bulb-4'])
     expect(peak).toBe(1)
+  })
+  it('writes a secret-free inventory next to the encrypted setup', async () => {
+    const { home } = harness({ homes: trackHomes, acs: [], lgPat: 'secret-pat', smartLifeSession: session } as SavedSetup)
+    await home.rooms()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const [path, text] = inventory.writes.at(-1) ?? ['', '']
+    expect(path).toMatch(/inventario\.md$/)
+    expect(text).toContain('Trilho do Office')
+    expect(text).toContain('smartlife="Office_1"')
+    expect(text).not.toMatch(/fixture-key|secret-pat|fake/)
   })
   it('accepts quantized group read-backs without resending or reporting failure', async () => {
     const { home, tuya } = harness({ homes: trackHomes, acs: [] })

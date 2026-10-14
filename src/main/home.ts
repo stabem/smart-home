@@ -1,6 +1,9 @@
 import type { AirConditioner, DeviceCommand, Room, SetupStatus } from '../shared/types'
 import { LgClient } from './lg/client'
 import { SetupStore, type SavedSetup } from './store'
+import { app } from 'electron'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { SmartLifeCloud, TuyaService, confirms, type SmartLifeHome, type SmartLifeSession } from './tuya'
 import { applyLightGroups, suggestLightGroups, validateLightGroups } from './light-groups'
 import type { LightGroup, LightState } from '../shared/types'
@@ -178,7 +181,29 @@ export class HomeController {
     ]))
     const groups = this.groups(rooms)
     if (this.saved.syncGuard !== false) await this.reapplyDrift(rooms, groups)
-    return applyLightGroups(rooms, groups, this.groupFailures)
+    const grouped = applyLightGroups(rooms, groups, this.groupFailures)
+    void this.writeInventory(grouped, groups)
+    return grouped
+  }
+
+  /** Human-readable house inventory (names, rooms, groups, state) for support. Never keys or tokens. */
+  private async writeInventory(rooms: Room[], groups: LightGroup[]): Promise<void> {
+    const devices = new Map(this.saved?.homes.flatMap(home => home.devices).map(device => [device.id, device]) ?? [])
+    const lines = [`# Casa — inventário (${new Date().toLocaleString('pt-BR')})`, '']
+    for (const room of rooms) {
+      lines.push(`## ${room.name}`)
+      for (const light of room.lights) {
+        const device = devices.get(light.id.split(':')[0])
+        const kind = light.memberIds ? `grupo de ${light.memberIds.length}` : device?.category === 'dj' ? 'lâmpada' : 'interruptor'
+        const where = light.state.viaCloud ? 'nuvem' : light.state.online ? 'wifi' : 'offline'
+        lines.push(`- ${light.name} [${kind}] id=${light.id} smartlife="${device?.name ?? '?'}" sala-smartlife="${device?.roomName ?? '?'}" ${light.state.on ? 'ligada' : 'desligada'} via ${where}`)
+        for (const member of light.memberIds ?? []) lines.push(`    - membro ${member} smartlife="${devices.get(member.split(':')[0])?.name ?? '?'}"`)
+      }
+      for (const ac of room.acs) lines.push(`- ${ac.name} [ar] id=${ac.id} ${ac.state.online ? 'online' : 'offline'}`)
+      lines.push('')
+    }
+    lines.push('## Grupos', ...groups.map(group => `- ${group.name} (${group.roomId}): ${group.memberIds.join(', ')}`))
+    try { await writeFile(join(app.getPath('userData'), 'inventario.md'), lines.join('\n'), 'utf8') } catch { /* support file only */ }
   }
 
   private groups(rooms: Room[]): LightGroup[] {
