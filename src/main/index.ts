@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, nativeImage, screen, Tray, Menu } from 'el
 import { join } from 'node:path'
 import { HomeController } from './home'
 import { loadEnvironment } from './store'
+import { fitWindowHeight } from './window-fit'
 
 app.setName('smart-home-tray')
 loadEnvironment()
@@ -61,6 +62,15 @@ app.whenReady().then(() => {
   ipcMain.handle('groups:save', (_event, groups: unknown) => home.saveLightGroups(groups))
   ipcMain.handle('home:edit', (_event, assignments: unknown, names: unknown, groups: unknown) => home.saveHomeEdits(assignments, names, groups))
   ipcMain.handle('login:get', () => app.getLoginItemSettings().openAtLogin)
+  ipcMain.on('window:fit', (event, contentHeight: unknown) => {
+    if (!popup || event.sender !== popup.webContents || typeof contentHeight !== 'number') return
+    const area = screen.getDisplayMatching(tray?.getBounds() ?? popup.getBounds()).workArea
+    const height = fitWindowHeight(contentHeight, area.height)
+    if (popup.getSize()[1] !== height) {
+      popup.setSize(420, height, false)
+      positionPopup()
+    }
+  })
   ipcMain.handle('login:set', (_event, enabled: boolean) => {
     if (typeof enabled !== 'boolean') throw new Error('Invalid login setting')
     app.setLoginItemSettings({ openAtLogin: enabled })
@@ -74,8 +84,8 @@ app.whenReady().then(() => {
     resizable: false,
     skipTaskbar: true,
     autoHideMenuBar: true,
-    transparent: true,
     backgroundMaterial: 'acrylic',
+    roundedCorners: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -83,10 +93,15 @@ app.whenReady().then(() => {
       sandbox: true
     }
   })
-  popup.on('blur', () => popup?.hide())
+  popup.on('blur', () => { if (process.env.SMART_HOME_CAPTURE_WINDOW !== '1') popup?.hide() })
   popup.on('close', (event) => { event.preventDefault(); popup?.hide() })
   if (process.env.ELECTRON_RENDERER_URL) popup.loadURL(process.env.ELECTRON_RENDERER_URL)
   else popup.loadFile(join(__dirname, '../renderer/index.html'))
+  if (process.env.SMART_HOME_CAPTURE_WINDOW === '1') popup.webContents.once('did-finish-load', () => {
+    positionPopup()
+    popup?.show()
+    popup?.focus()
+  })
 
   tray = new Tray(trayIcon())
   tray.setToolTip('Casa')

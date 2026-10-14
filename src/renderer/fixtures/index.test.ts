@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createFixtureApi, houseRooms } from './index'
+import { createFixtureApi, houseRooms, houseTenRooms } from './index'
 import { updatedLabel } from '../App'
 
 describe('house fixture', () => {
+  it('provides ten rooms for fit proof', () => {
+    expect(houseTenRooms()).toHaveLength(10)
+    expect(houseTenRooms().slice(-2).map(room => room.name)).toEqual(['Closet', 'Lavanderia'])
+  })
   it('matches the eight documented rooms and three ACs', () => {
     const rooms = houseRooms()
     expect(rooms.map((room) => room.name)).toEqual(['Entrada', 'Cozinha', 'Mesa de jantar', 'Sala de estar', 'Banheiro', 'Banheiro da suíte', 'Office', 'Quarto'])

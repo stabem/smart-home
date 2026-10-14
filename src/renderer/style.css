@@ -35,7 +35,7 @@
   }
 }
 * { box-sizing: border-box; }
-html, body, #root { width: 100%; min-height: 100%; margin: 0; }
+html, body, #root { width: 100%; height: 100%; min-height: 100%; margin: 0; }
 body {
   color: var(--ink);
   background: transparent;
@@ -72,22 +72,23 @@ button:focus-visible, input:focus-visible, select:focus-visible,
 }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .lineIcon { display: block; width: 19px; height: 19px; }
-.viewStage { position: relative; width: min(100%, 420px); height: 640px; margin: 0 auto; }
+.viewStage { position: relative; width: min(100%, 420px); height: 100vh; margin: 0 auto; }
 .shell {
   position: absolute;
   inset: 0;
   width: 100%;
-  height: 640px;
+  height: 100%;
   overflow: auto;
   padding: 20px 18px 18px;
   border-radius: 26px;
   background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,0) 38%), var(--glass);
-  box-shadow: inset 0 .5px 0 var(--inner), inset 0 0 0 .5px rgba(255,255,255,.07), 0 24px 60px rgba(10, 12, 24, .28);
+  box-shadow: inset 0 .5px 0 var(--inner), inset 0 0 0 .5px rgba(255,255,255,.07);
   backdrop-filter: blur(44px) saturate(1.45);
   -webkit-backdrop-filter: blur(44px) saturate(1.45);
   scrollbar-width: none;
 }
 .shell::-webkit-scrollbar, .editContent::-webkit-scrollbar { display: none; }
+.homeScreen { overflow-y: auto; overflow-x: hidden; }
 @media (prefers-reduced-transparency: reduce) {
   .shell { background: #f2f2f6; backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
@@ -108,6 +109,9 @@ h2 { font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--muted); l
 .sectionHeading { display: flex; align-items: baseline; justify-content: space-between; min-height: 22px; margin-bottom: 8px; }
 .allOff { border: 0; padding: 3px 10px; border-radius: 999px; background: var(--circle); color: var(--ink); font-size: 12px; font-weight: 600; }
 .rooms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.rooms.tenRooms, .rooms.manyRooms { gap: 8px; }
+.rooms.tenRooms .roomTile { height: 92px; padding: 8px 10px; }
+.rooms.manyRooms .roomTile { height: 84px; padding: 5px 10px; }
 .roomTile {
   position: relative; min-width: 0; height: 106px; padding: 11px 12px 12px; overflow: hidden;
   border-radius: 20px; background: var(--module);
@@ -115,11 +119,11 @@ h2 { font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--muted); l
   transition: background .25s ease-out, box-shadow .25s ease-out;
 }
 .roomTile::before {
-  content: ''; position: absolute; inset: -40% -20% 20% -20%; pointer-events: none; opacity: 0;
+  content: ''; position: absolute; inset: -40% -20% 20% -20%; pointer-events: none; opacity: 0; transform: scale(.6);
   background: radial-gradient(60% 70% at 18% 22%, var(--pool), transparent 70%);
-  transition: opacity .35s ease-out;
+  transition: opacity .22s ease-out, transform .22s ease-out;
 }
-.roomTile.isLit::before { opacity: 1; }
+.roomTile.isLit::before { opacity: 1; transform: scale(1); transition-duration: .45s; }
 .roomTile.isLit { background: color-mix(in srgb, var(--module) 88%, var(--accent) 12%); box-shadow: inset 0 .5px 0 rgba(255, 220, 160, .45); }
 .roomTile.isCool::after {
   content: ''; position: absolute; inset: 30% -25% -45% 25%; pointer-events: none;
@@ -127,12 +131,16 @@ h2 { font-size: 13px; line-height: 1.2; font-weight: 600; color: var(--muted); l
 }
 .roomTile.isCool { background: color-mix(in srgb, var(--module) 88%, var(--blue) 12%); }
 .roomLights, .lightSwitch:not(.roomLights), .acPower, .acIcon {
-  display: grid; place-items: center; flex: none; width: 40px; height: 40px;
+  display: grid; place-items: center; flex: none; width: 36px; height: 36px;
   border: 0; border-radius: 50%; background: var(--circle);
   box-shadow: inset 0 .5px 0 rgba(255,255,255,.18);
   transition: background .18s ease-out, box-shadow .18s ease-out, transform .12s ease-out;
 }
 .roomLights { position: relative; z-index: 2; }
+.roomGlyphWrap { display: grid; place-items: center; }
+.roomGlyph { width: 21px; height: 21px; opacity: .6; }
+.roomLights[data-selected] .roomGlyph { opacity: 1; }
+.roomLights[data-selected] { color: #fff; }
 .roomLights .lampSymbol, .lightSwitch .lampSymbol { width: 21px; height: 21px; opacity: .62; }
 .roomLights[data-selected], .lightSwitch[data-selected] {
   background: linear-gradient(180deg, #ffc866, var(--accent-deep));
@@ -167,9 +175,11 @@ input[role=switch] {
   width: 100%; height: 41px; min-width: 0; margin-top: 2px; padding: 0; position: relative; z-index: 1;
   border: 0; background: none; text-align: left;
 }
+.rooms.manyRooms .roomName { height: 36px; }
 .tileName { display: block; max-width: 100%; font-size: 16px; line-height: 19px; font-weight: 600; letter-spacing: -.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roomName small { display: block; max-width: 100%; margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 16px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cloudGlyph { margin-left: 4px; opacity: .7; }
+.statusGlyph { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; opacity: .6; }
 .isLit .roomName small { color: color-mix(in srgb, var(--ink) 70%, var(--accent) 30%); }
 .tilePending, .controlPending { display: block; width: 6px; height: 6px; border-radius: 50%; background: #5ac8fa; animation: pendingPulse 1s ease-in-out infinite; }
 .tilePending { position: absolute; top: 24px; left: 50px; }
@@ -188,6 +198,7 @@ input[role=switch] {
   box-shadow: inset 0 .5px 0 var(--module-top);
 }
 .devicePanel { padding: 12px 13px; }
+.devicePanel.unavailable { opacity: .7; }
 .deviceHead { display: flex; align-items: center; min-width: 0; gap: 10px; }
 .deviceText { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
 .deviceText strong, .acHead strong { min-width: 0; font-size: 16px; font-weight: 600; line-height: 19px; letter-spacing: -.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -217,6 +228,7 @@ input[role=switch] {
 .acIcon.active .lineIcon { filter: invert(1); }
 .acPower { margin-left: auto; font-size: 22px; line-height: 1; }
 .acPower.active { background: linear-gradient(180deg, #86d4ff, #3aa9ea); color: #fff; box-shadow: inset 0 .5px 0 rgba(255,255,255,.6), 0 6px 18px rgba(79,184,245,.4); }
+.acPower.isPending { box-shadow: inset 0 0 0 2px #5ac8fa, 0 0 0 2px rgba(90,200,250,.2); }
 .airMotion { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
 .acReading { margin: 13px 0 10px; text-align: center; }
 .ambient { display: block; margin-bottom: 7px; color: var(--muted); font-size: 13px; text-align: left; }

@@ -1,5 +1,5 @@
 {
-  "promise": "Design polish: lit rooms show a warm light pool and glowing amber button, AC-on a cool pool; 40 px controls; 106 px tiles; stronger type hierarchy; module highlights; one status line under Casa. Journeys, axe and behaviour unchanged.",
-  "scopePaths": ["src/renderer/style.css", "src/renderer/App.tsx", ".graphhelm/keel-card.json"],
-  "proof": "sh ci/local-ci.sh && npx playwright test && echo PROOF_OK"
+  "promise": "The real Electron popup has rounded corners and fits the home's rooms without Home scrolling. Room controls use room icons, clear device status, and reduced-motion-safe feedback.",
+  "scopePaths": [".graphhelm/keel-card.json", "package.json", "package-lock.json", "src/main/index.ts", "src/main/window-fit.ts", "src/main/window-fit.test.ts", "src/preload/index.ts", "src/shared/types.ts", "src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/main.tsx", "src/renderer/roomIcons.ts", "src/renderer/roomIcons.test.ts", "src/renderer/fixtures/index.ts", "src/renderer/fixtures/index.test.ts", "src/renderer/design-proof.mjs", "tests/issue-46.spec.ts", "test-results/design/real-window.png"],
+  "proof": "npm ci; npx electron-vite build; sh ci/local-ci.sh; Playwright on a free port for fixture=house10; node src/renderer/design-proof.mjs; inspect test-results/design/real-window.png from the running Electron window"
 }
