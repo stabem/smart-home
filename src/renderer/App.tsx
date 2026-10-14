@@ -300,7 +300,7 @@ export function App({ api }: { api: SmartHomeApi }) {
       </motion.section>)}
     </div>{alert}
   </PresenceScreen> : <PresenceScreen key="home" className="shell homeScreen" direction={-16} reducedMotion={reducedMotion}>
-    <header className="topbar"><h1>Casa</h1><button className="settingsButton" aria-label="Configurações" onClick={() => void openEdit()}><Icon src={settingsIcon} /></button></header>
+    <header className="topbar"><div><h1>Casa</h1><span className="status">{lightsOn > 0 ? `${lightsOn} ${lightsOn === 1 ? 'luz acesa' : 'luzes acesas'}` : 'Tudo apagado'}</span></div><button className="settingsButton" aria-label="Configurações" onClick={() => void openEdit()}><Icon src={settingsIcon} /></button></header>
     {!setup.smartLifeConnected && <section className="reconnectBanner" aria-label="Smart Life desconectado">
       <p><strong>Smart Life desconectado</strong><span>Reconecte para usar as luzes pela nuvem.</span></p>
       <button type="button" onClick={() => setReconnecting(true)}>Reconectar Smart Life</button>
