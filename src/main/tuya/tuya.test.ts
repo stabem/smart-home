@@ -369,6 +369,21 @@ describe('Smart Life QR flow', () => {
       expect(await cloud.deviceStatus(session, 'sw')).toEqual({ switch_1: true })
     } finally { vi.restoreAllMocks() }
   })
+  it('confirms on the retry through the real cache when the first post-command batch lags', async () => {
+    let statusCalls = 0
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes('/commands')) return { ok: true, json: async () => ({ success: true, result: true }) }
+      statusCalls++
+      return { ok: true, json: async () => ({ success: true, result: [{ id: 'sw', status: [{ code: 'switch_1', value: statusCalls >= 2 }] }] }) }
+    })
+    const cloud = new SmartLifeCloud(fetcher as unknown as typeof fetch, new SmartLifeRequestQueue(() => Date.now(), async () => {}, () => 0))
+    const session: SmartLifeSession = { endpoint: 'https://example.invalid', accessToken: 'fake', refreshToken: 'fake', expiresAt: Date.now() + 3600000, uid: 'u', terminalId: 't' }
+    const service = new TuyaService(cloud, {} as TuyaLanClient, vi.fn().mockResolvedValue(new Map()))
+    vi.spyOn(cloud, 'listHomes').mockResolvedValue([{ id: 'home', name: 'Casa', devices: [{ id: 'sw', name: 'Cozinha', category: 'kg', localKey: '', homeId: 'home' }] }])
+    await service.discover(session)
+    expect(await service.setLight('sw', { on: true })).toMatchObject({ on: true, online: true })
+    expect(statusCalls).toBe(2)
+  })
   it('takes online from ha/home/devices even when cached switch status says on', async () => {
     const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ success: true, result: [
       { id: 'one', online: false, status: [{ code: 'switch_led', value: true }] }

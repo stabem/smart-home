@@ -308,8 +308,9 @@ export class TuyaService {
       }
       let state = await this.cloudState(selected.id, selected.dp)
       if (!confirms(state, patch)) {
-        // Tuya's status often lags the accepted command by a moment; read once more before judging.
+        // Tuya's status often lags the accepted command by a moment; read once more, bypassing the cache, before judging.
         await new Promise(resolve => setTimeout(resolve, 800))
+        this.cloud.invalidateStatus?.(selected.id)
         state = await this.cloudState(selected.id, selected.dp)
       }
       if (confirms(state, patch)) return state

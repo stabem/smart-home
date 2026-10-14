@@ -283,6 +283,12 @@ export class SmartLifeCloud {
     return refreshed.status
   }
 
+  /** Force the next deviceStatus for this device to come from a new batch (used by the confirmation retry). */
+  invalidateStatus(id: string): void {
+    this.statusCache.delete(id)
+    this.commandAt.set(id, this.nextSeq())
+  }
+
   async sendCommands(session: SmartLifeSession, id: string, commands: Array<{ code: string; value: unknown }>): Promise<void> {
     try { await this.request(session, `/v1.1/m/thing/${encodeURIComponent(id)}/commands`, undefined, { commands }, false, id) }
     catch (error) {
