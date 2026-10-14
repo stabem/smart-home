@@ -1,26 +1,16 @@
 {
-  "promise": "Tuya 3.5 controls use TinyTuya CONTROL_NEW framing; failed LAN writes use a rate-limited Smart Life queue with batched status, backoff and stale last-known state; groups retry LAN members first; names and labels are readable; the 420x640 Editar casa sheet saves edits without losing setup.",
+  "promise": "A light or AC press and brightness drag paint in the same frame, keep the latest pending intent, and roll back with a local error after a delayed failure. Room navigation and expansion feel native, remain keyboard accessible, and honor reduced motion.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
-    "src/main/home.test.ts",
-    "src/main/home.ts",
-    "src/main/index.ts",
-    "src/main/light-groups.ts",
-    "src/main/lg/client.test.ts",
-    "src/main/lg/client.ts",
-    "src/main/store/index.ts",
-    "src/main/tuya/cloud.ts",
-    "src/main/tuya/index.ts",
-    "src/main/tuya/protocol.ts",
-    "src/main/tuya/tuya.test.ts",
-    "src/preload/index.ts",
+    "docs/DESIGN.md",
+    "package.json",
+    "package-lock.json",
     "src/renderer/App.tsx",
     "src/renderer/design-proof.mjs",
     "src/renderer/fixtures/index.ts",
     "src/renderer/style.css",
-    "src/shared/types.ts",
-    "test-results/design/light-edit.png",
-    "test-results/design/dark-edit.png"
+    "tests/interaction.spec.ts",
+    "test-results/design/interaction.webm"
   ],
-  "proof": "npm test -- src/main/tuya/tuya.test.ts src/main/lg/client.test.ts src/main/home.test.ts (control vector, queue rate, backoff, batched status, stale state, edit persistence); node src/renderer/design-proof.mjs (free port, 420x640 edit screenshots, axe, edit interaction); sh ci/local-ci.sh; npm run build; SMART_HOME_TEST_PORT=5191 npm run test:journey"
+  "proof": "npx playwright test on a free port (1500 ms fixture, same-frame mark <16 ms, rollback, drag, room video and frame samples); node src/renderer/design-proof.mjs (screenshots, axe, focus, idle); sh ci/local-ci.sh; npm run build; inspect interaction.webm"
 }
