@@ -296,8 +296,7 @@ export class HomeController {
       const patch = (desired.on === false ? { on: false } : Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key)))) as Partial<LightState>
       const drifted = members.filter(light => light.state.online && !light.state.stale && !confirms(light.state, patch))
         .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
-      const results = []
-      for (const light of drifted) results.push(await Promise.allSettled([this.setGroupMember(light.id, patch)]).then(([result]) => result))
+      const results = await Promise.allSettled(drifted.map(light => this.setGroupMember(light.id, patch)))
       this.groupFailures[group.id] = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [drifted[index].name] : [])
       results.forEach((result, index) => { if (result.status === 'fulfilled' && result.value.online) drifted[index].state = result.value })
     }
@@ -417,8 +416,7 @@ export class HomeController {
           : command.kind === 'light.color' ? { color: command.color } : { temperature: command.temperature }
       const members = rooms.flatMap(room => room.lights).filter(item => group.memberIds.includes(item.id))
         .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
-      const results = []
-      for (const member of members) results.push(await Promise.allSettled([this.setGroupMember(member.id, patch)]).then(([result]) => result))
+      const results = await Promise.allSettled(members.map(member => this.setGroupMember(member.id, patch)))
       const failed = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [members[index].name] : [])
       this.groupFailures[group.id] = failed
       this.saved.groupLastState = { ...this.saved.groupLastState, [group.id]: { ...this.saved.groupLastState?.[group.id], ...patch } }

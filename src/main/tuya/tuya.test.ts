@@ -220,6 +220,41 @@ describe('Tuya LAN', () => {
 })
 
 describe('Smart Life QR flow', () => {
+  it('starts four distinct device commands within 360 ms and caps in-flight work at four', async () => {
+    let now = 10_000
+    const starts: number[] = []
+    const releases: Array<() => void> = []
+    const queue = new SmartLifeRequestQueue(() => now, async ms => { now += ms }, () => 0)
+    const commands = [1, 2, 3, 4, 5].map(id => queue.run(async () => {
+      starts.push(now)
+      await new Promise<void>(resolve => { releases.push(resolve) })
+    }, 'command', String(id)))
+    await vi.waitFor(() => expect(starts).toHaveLength(4))
+    expect(starts).toEqual([10_000, 10_120, 10_240, 10_360])
+    releases[0]()
+    await vi.waitFor(() => expect(starts).toHaveLength(5))
+    expect(starts[4]).toBe(10_480)
+    releases.slice(1).forEach(release => release())
+    await Promise.all(commands)
+  })
+
+  it('keeps commands for one device serial and pauses both lanes after a command rate limit', async () => {
+    let now = 10_000
+    const starts: number[] = []
+    const queue = new SmartLifeRequestQueue(() => now, async ms => { now += ms }, () => 0)
+    let release!: () => void
+    const first = queue.run(async () => { starts.push(now); await new Promise<void>(resolve => { release = resolve }) }, 'command', 'one')
+    const second = queue.run(async () => { starts.push(now); throw new SmartLifeRateLimitError('code=-9999999') }, 'command', 'one')
+    await vi.waitFor(() => expect(starts).toHaveLength(1))
+    release()
+    await first
+    await expect(second).rejects.toBeInstanceOf(SmartLifeRateLimitError)
+    expect(starts).toEqual([10_000, 10_120])
+    await queue.run(async () => { starts.push(now) })
+    await queue.run(async () => { starts.push(now) }, 'command', 'two')
+    expect(starts).toEqual([10_000, 10_120, 12_120, 12_120])
+  })
+
   it('shares a two-per-second queue and backs off exponentially on the sharing limit', async () => {
     let now = 10_000
     const starts: number[] = []
