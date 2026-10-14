@@ -2,11 +2,11 @@
   "promise": "Tuya bulbs use each device's code-to-DP mapping for LAN read and write; quantized HSV color and brightness or temperature rounding within one UI step confirm control without duplicate cloud commands, while an unconfirmed group member cannot turn healthy members off.",
   "scopePaths": [
     ".graphhelm/keel-card.json",
+    "src/main/home.test.ts",
+    "src/main/home.ts",
     "src/main/tuya/cloud.ts",
     "src/main/tuya/index.ts",
-    "src/main/tuya/tuya.test.ts",
-    "src/main/home.ts",
-    "src/main/home.test.ts"
+    "src/main/tuya/tuya.test.ts"
   ],
   "proof": "npx vitest run src/main/tuya/tuya.test.ts src/main/home.test.ts; sh ci/local-ci.sh"
 }

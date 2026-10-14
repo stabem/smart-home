@@ -61,6 +61,16 @@ describe('main process setup and control', () => {
     expect(calls).toEqual(['bulb-3', 'bulb-1', 'bulb-2', 'bulb-2', 'bulb-4'])
     expect(peak).toBe(1)
   })
+  it('accepts quantized group read-backs without resending or reporting failure', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const id = home.groupSetup().groups[0].id
+    tuya.setLight.mockImplementation(async (_lightId: string, patch: Record<string, unknown>) => ({
+      on: true, online: true, ...('brightness' in patch ? { brightness: 50 } : {}), ...('color' in patch ? { color: '#00025a' } : {})
+    }))
+    await home.command({ kind: 'light.brightness', deviceId: id, brightness: 51 })
+    await home.command({ kind: 'light.color', deviceId: id, color: '#00015a' })
+    expect(tuya.setLight).toHaveBeenCalledTimes(8)
+  })
 
   it('names failed track members and reapplies the last desired state after drift', async () => {
     const { home, tuya, store } = harness({ homes: trackHomes, acs: [] })
