@@ -28,17 +28,25 @@ export function houseRooms(): Room[] {
   return rooms
 }
 
-export function createFixtureApi(fixture: 'house' | 'empty'): SmartHomeApi {
+export function houseTenRooms(): Room[] {
+  return [...houseRooms(), ...['Closet', 'Lavanderia'].map((name, index) => ({
+    id: `room-${index + 9}`, name,
+    lights: [{ id: `light-${index + 9}`, name: `Luz ${name}`, state: { on: false, brightness: 70, online: true } }],
+    acs: []
+  }))]
+}
+
+export function createFixtureApi(fixture: 'house' | 'house10' | 'empty'): SmartHomeApi {
   const params = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search)
   const latency = Math.min(5000, Math.max(0, Number(params.get('latency') || 0)))
   const failure = params.get('failure')
   let failedOnce = false
-  let rooms = fixture === 'house' ? houseRooms() : []
+  let rooms = fixture === 'house' ? houseRooms() : fixture === 'house10' ? houseTenRooms() : []
   let groups = suggestLightGroups(rooms)
-  let configured = fixture === 'house'
+  let configured = fixture !== 'empty'
   let found: Room[] | null = null
   let launchAtLogin = false
-  let smartLifeConnected = fixture === 'house' && (typeof location === 'undefined' || new URLSearchParams(location.search).get('session') !== 'missing')
+  let smartLifeConnected = fixture !== 'empty' && (typeof location === 'undefined' || new URLSearchParams(location.search).get('session') !== 'missing')
   let syncGuard = true
   return {
     async getRooms() { const copy = structuredClone(rooms); return applyLightGroups(copy, groups) },

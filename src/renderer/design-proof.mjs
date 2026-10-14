@@ -48,7 +48,7 @@ try {
         const tiles = [...globalThis.document.querySelectorAll('.roomTile')].map(rect)
         const shell = globalThis.document.querySelector('.shell')
         return { modules, tiles, shell: rect(shell), documentHeight: globalThis.document.documentElement.scrollHeight,
-          bulbs: [...globalThis.document.querySelectorAll('.roomTile .lampSymbol')].length,
+          bulbs: [...globalThis.document.querySelectorAll('.roomTile .roomGlyph')].length,
           tileControls: [...globalThis.document.querySelectorAll('.roomTile .roomLights')].length,
           titleSurface: globalThis.document.querySelectorAll('.roomTitle .sharedRoomSurface').length }
       })
@@ -56,7 +56,7 @@ try {
       assert.equal(geometry.titleSurface, 0, `${theme} ${name}: plain room heading`)
       if (name === 'home') {
         assert.equal(geometry.tiles.length, 8)
-        assert.equal(geometry.bulbs, 8, 'one bulb glyph per tile')
+        assert.equal(geometry.bulbs, 8, 'one room glyph per tile')
         assert.equal(geometry.tileControls, 8, 'one light control per tile')
         assert.ok(geometry.tiles.every(tile => tile.bottom <= 620 && tile.left >= 0 && tile.right <= 420), `${theme}: home tiles fit`)
       } else if (name !== 'setup') {
