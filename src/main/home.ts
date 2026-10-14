@@ -368,7 +368,7 @@ export class HomeController {
     for (let attempt = 0; attempt < 8; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 3000))
       if (superseded()) return
-      last = await this.lg.getAcState(ac.id).catch(() => undefined) ?? last
+      last = await this.lg.getAcState(ac.id).catch(() => undefined)  // only the final explicit read decides OFF
       if (superseded()) return
       if (last?.on) { this.authoritativeOff.delete(ac.id); release(); console.info('LG confirm result=on'); return }
     }

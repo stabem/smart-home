@@ -253,6 +253,16 @@ describe('main process setup and control', () => {
       expect((await midway).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
       await vi.advanceTimersByTimeAsync(30000)
       lg.getAcState.mockResolvedValue({ on: false, targetTemperature: 23, online: true })
+      // A final read that FAILS must not reuse an older OFF: no off marker, state stays whatever the next read says.
+      lg.setAc.mockResolvedValueOnce(undefined)
+      let reads = 0
+      lg.getAcState.mockImplementation(async () => { reads++; if (reads === 1) return { on: false, targetTemperature: 23, online: true }; throw new Error('LG API request failed (500)') })
+      const flaky = home.command({ kind: 'ac.power', deviceId: 'ac-1', on: true })
+      await vi.advanceTimersByTimeAsync(6100)
+      await flaky
+      await vi.advanceTimersByTimeAsync(30000)
+      lg.getAcState.mockResolvedValue({ on: true, targetTemperature: 23, online: true })
+      expect((await home.rooms()).flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(true)
       await vi.advanceTimersByTimeAsync(25000)
       const rooms = await home.rooms()
       expect(rooms.flatMap(room => room.acs).find(item => item.id === 'ac-1')?.state.on).toBe(false)
