@@ -77,6 +77,17 @@ describe('main process setup and control', () => {
     expect(text).toMatch(/\[ar\] id=ac-1 online via nuvem/)
     expect(text).not.toMatch(/fixture-key|secret-pat|fake/)
   })
+  it('treats an unconfirmed member as accepted, not failed, and not as drift', async () => {
+    const { home, tuya } = harness({ homes: trackHomes, acs: [] })
+    const id = home.groupSetup().groups[0].id
+    tuya.setLight.mockImplementation(async (_lightId: string, patch: Record<string, unknown>) => ({ on: true, online: true, viaCloud: true, unconfirmed: true, ...patch }))
+    await home.command({ kind: 'light.power', deviceId: id, on: true })
+    expect(tuya.setLight).toHaveBeenCalledTimes(4)   // no retries, no 'Falha em'
+    tuya.getState.mockResolvedValue({ on: false, online: true, viaCloud: true, unconfirmed: true } as unknown as { on: boolean; online: boolean })
+    tuya.setLight.mockClear()
+    await home.rooms()                                 // sync guard must not re-apply to unconfirmed members
+    expect(tuya.setLight).not.toHaveBeenCalled()
+  })
   it('accepts quantized group read-backs without resending or reporting failure', async () => {
     const { home, tuya } = harness({ homes: trackHomes, acs: [] })
     const id = home.groupSetup().groups[0].id

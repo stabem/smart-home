@@ -277,6 +277,8 @@ export class HomeController {
       try {
         const state = await this.tuya.setLight(id, patch)
         if (confirms(state, patch)) return state
+        // Accepted by the cloud but status still lagging: not a failure, just not yet confirmed.
+        if (state.unconfirmed) return state
         if (state.reason) throw new Error('Sem energia')
         last = new Error('offline after LAN and cloud control')
       } catch (error) { last = error; if (error instanceof Error && error.message === 'Sem energia') throw error }
@@ -294,7 +296,7 @@ export class HomeController {
       if (!desired) continue
       const members = rooms.flatMap(room => room.lights).filter(light => group.memberIds.includes(light.id))
       const patch = (desired.on === false ? { on: false } : Object.fromEntries(Object.entries(desired).filter(([key]) => ['on', 'brightness', 'color', 'temperature'].includes(key)))) as Partial<LightState>
-      const drifted = members.filter(light => light.state.online && !light.state.stale && !confirms(light.state, patch))
+      const drifted = members.filter(light => light.state.online && !light.state.stale && !light.state.unconfirmed && !confirms(light.state, patch))
         .sort((a, b) => Number(!!this.tuya.hasLan?.(b.id)) - Number(!!this.tuya.hasLan?.(a.id)))
       const results = await Promise.allSettled(drifted.map(light => this.setGroupMember(light.id, patch)))
       this.groupFailures[group.id] = results.flatMap((result, index) => result.status === 'rejected' || !result.value.online ? [drifted[index].name] : [])
