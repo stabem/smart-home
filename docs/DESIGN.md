@@ -1,6 +1,6 @@
 # Design — Smart Home Control Center
 
-The tray uses the visual language of macOS Control Center: one frosted sheet over wallpaper, compact rounded modules, direct circular controls, and filled pill sliders. References: the [Apple Control Center screenshot](https://support.apple.com/guide/mac-pro/control-center-apdc362a41b2/mac) and an [unannotated macOS Ventura screenshot](https://www.techrepublic.com/article/customize-macos-ventura-control-center/). Copies are in `test-results/design/reference/`; the unannotated screenshot is used in the side-by-side composite.
+The tray uses the visual language of macOS Control Center: one frosted sheet over wallpaper, compact rounded modules, direct circular controls, and filled pill sliders. References: the [Apple Control Center screenshot](https://support.apple.com/guide/mac-pro/control-center-apdc362a41b2/mac) and an [unannotated macOS Ventura screenshot](https://www.techrepublic.com/article/customize-macos-ventura-control-center/). The screenshots themselves are not kept in the repository (Apple copyright); fetch them from those links when you need a side-by-side.
 
 ## Window and type
 

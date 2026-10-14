@@ -1,13 +1,5 @@
 {
-  "promise": "After an accepted cloud command, confirmation reads are post-command fresh (never a cached/in-flight batch older than the command), retry once on lag, and a lagging status yields the requested state flagged unconfirmed instead of 'offline'. A failed status read still does not claim the change.",
-  "scopePaths": [
-    ".graphhelm/keel-card.json",
-    "src/main/home.test.ts",
-    "src/main/home.ts",
-    "src/main/tuya/cloud.ts",
-    "src/main/tuya/index.ts",
-    "src/main/tuya/tuya.test.ts",
-    "src/shared/types.ts"
-  ],
-  "proof": "npx vitest run src/main/tuya && echo PROOF_OK"
+  "promise": "No personal IP addresses remain in tests (RFC 5737 samples instead) and no Apple UI screenshots are tracked; behaviour unchanged.",
+  "scopePaths": ["src/main/tuya/tuya.test.ts", "docs/DESIGN.md", "test-results/design/reference/apple-control-center.png", "test-results/design/reference/macos-ventura-control-center.jpg", "test-results/design/control-center-side-by-side.png", ".graphhelm/keel-card.json"],
+  "proof": "sh ci/local-ci.sh && ! git grep -qE '177\.197|179\.119|179\.247' && echo PROOF_OK"
 }

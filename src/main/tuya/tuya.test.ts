@@ -37,7 +37,7 @@ describe('Tuya LAN', () => {
     const cipher = createCipheriv('aes-128-ecb', udpKey, null)
     const encrypted = Buffer.concat([cipher.update(announcement), cipher.final()])
     expect(decodeBroadcast(encrypted)).toEqual({ id: 'light-1', ip: '192.168.15.9', version: '3.3' })
-    expect(decodeBroadcast(Buffer.from('{"gwId":"light-1","ip":"177.197.79.210","version":"3.3"}'))).toBeUndefined()
+    expect(decodeBroadcast(Buffer.from('{"gwId":"light-1","ip":"203.0.113.10","version":"3.3"}'))).toBeUndefined()
   })
 
   it('listens on all three UDP ports and uses the packet source LAN address', async () => {
@@ -712,7 +712,7 @@ describe('typed light service', () => {
   })
   it('ignores cloud WAN IP and uses a verified TCP probe candidate', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
-      { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home', ip: '177.197.79.210' }
+      { id: 'light-1', name: 'Lamp', category: 'dj', localKey: device.localKey, homeId: 'home', ip: '203.0.113.10' }
     ] }]) }
     const lan = { request: vi.fn().mockResolvedValue({ '1': true }) }
     const probe = vi.fn().mockResolvedValue(['192.168.15.9'])
@@ -727,7 +727,7 @@ describe('typed light service', () => {
   it('uses Smart Life status and commands when LAN is absent', async () => {
     const cloud = {
       listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
-        { id: 'switch', name: 'Office', category: 'kg', localKey: device.localKey, homeId: 'home', ip: '179.119.114.249' }
+        { id: 'switch', name: 'Office', category: 'kg', localKey: device.localKey, homeId: 'home', ip: '198.51.100.23' }
       ] }]),
       deviceStatus: vi.fn().mockResolvedValue({ switch_1: true }),
       sendCommands: vi.fn().mockResolvedValue(undefined)
@@ -777,7 +777,7 @@ describe('typed light service', () => {
 
   it('scrubs a saved WAN IP and persists the corrected setup', async () => {
     const homes = [{ id: 'home', name: 'Casa', devices: [
-      { id: 'switch', name: 'Office', category: 'kg', localKey: device.localKey, homeId: 'home', ip: '179.247.255.254' }
+      { id: 'switch', name: 'Office', category: 'kg', localKey: device.localKey, homeId: 'home', ip: '192.0.2.44' }
     ] }]
     const service = new TuyaService({} as SmartLifeCloud, { request: vi.fn() } as unknown as TuyaLanClient,
       vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
