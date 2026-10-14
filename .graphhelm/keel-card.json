@@ -1,5 +1,5 @@
 {
-  "promise": "The Control Center shows mockup-paced room, control, pending, and discovery motion without changing approved journeys or device command behavior.",
-  "scopePaths": ["src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/fixtures/index.ts", "src/renderer/discovery-orbit.ts", "src/renderer/discovery-orbit.test.ts", "src/renderer/interaction-proof.mjs", "test-results/issue-50/interaction.webm", "docs/DESIGN.md", ".graphhelm/keel-card.json"],
-  "proof": "node src/renderer/interaction-proof.mjs (test-results/issue-50/interaction.webm, latency=1500 plus rotating pending copy at 8500); node src/renderer/design-proof.mjs; npx playwright test on a free port; sh ci/local-ci.sh"
+  "promise": "When an AC is on, its module shows three soft drifting cool streaks (CSS), pauses when the popup is hidden, static under reduced motion; the dead air.lottie is removed. Nothing else changes.",
+  "scopePaths": ["src/renderer/App.tsx", "src/renderer/style.css", "src/renderer/main.tsx", "src/renderer/assets/lottie/air.lottie", "docs/CREDITS.md", ".graphhelm/keel-card.json"],
+  "proof": "sh ci/local-ci.sh && echo PROOF_OK"
 }

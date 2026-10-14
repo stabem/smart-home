@@ -5,7 +5,6 @@ import type { CSSProperties, ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { DotLottie } from '@lottiefiles/dotlottie-web'
 import type { DeviceCommand, LightGroup, Room, SetupStatus, SmartHomeApi } from '../shared/types'
-import airMotion from './assets/lottie/air.lottie?url'
 import scanMotion from './assets/lottie/scan.lottie?url'
 import bulbIcon from './assets/icons/light-bulb.svg?url'
 import airIcon from './assets/icons/snow-flake.svg?url'
@@ -357,9 +356,9 @@ export function App({ api }: { api: SmartHomeApi }) {
           {light.state.color === undefined && light.state.temperature === undefined && <p className="help" role="status">Controle de cor ainda não disponível para este dispositivo.</p>}
         </motion.div>}</AnimatePresence>
       </motion.section>)}
-      {room.acs.map((ac, index) => <motion.section layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .5, delay: reducedMotion ? 0 : (room.lights.length + index) * .08, ease }} className="acPanel" key={ac.id}>
+      {room.acs.map((ac, index) => <motion.section layout={!reducedMotion} initial={reducedMotion ? false : { opacity: 0, y: 10, scale: .97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: reducedMotion ? 0 : .5, delay: reducedMotion ? 0 : (room.lights.length + index) * .08, ease }} className={`acPanel ${ac.state.on ? "isOn" : ""}`} key={ac.id}>
         <div className="deviceHead acHead"><span className={`deviceIcon acIcon ${ac.state.on ? 'active' : ''}`} aria-hidden="true"><Icon src={airIcon} /></span><strong>{ac.name}</strong><button className={`acPower ${ac.state.on ? 'active' : ''} ${isPending(ac.id) ? 'isPending' : ''}`} aria-label={ac.state.on ? 'Desligar ar' : 'Ligar ar'} disabled={!ac.state.online} onClick={() => void command({ kind: 'ac.power', deviceId: ac.id, on: !ac.state.on })}><span aria-hidden="true">⏻</span></button></div>
-        <Motion src={airMotion} active={ac.state.on} className="airMotion" />
+        <div className={`wind ${ac.state.on ? "on" : ""}`} aria-hidden="true"><span className="gust g1" /><span className="gust g2" /><span className="gust g3" /></div>
         <div className="acReading"><span className="ambient">Ambiente {ac.state.currentTemperature ?? '—'}°</span><div className="temperature"><Button aria-label="Diminuir" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.max(16, ac.state.targetTemperature - 1) })}>−</Button><strong>{ac.state.targetTemperature}°</strong><Button aria-label="Aumentar" isDisabled={!ac.state.online} onPress={() => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Math.min(30, ac.state.targetTemperature + 1) })}>+</Button></div></div>
         <Slider className="acSlider" aria-label="Temperatura" minValue={16} maxValue={30} value={ac.state.targetTemperature} isDisabled={!ac.state.online} onChange={temperature => command({ kind: 'ac.temperature', deviceId: ac.id, temperature: Number(temperature) })}><SliderTrack className="sliderTrack" style={{ '--fill': `${((ac.state.targetTemperature - 16) / 14) * 100}%` } as CSSProperties}><SliderThumb className="ghostThumb" /></SliderTrack></Slider>
         <div className="acActions"><button aria-label="Modo" disabled={!ac.state.online} aria-expanded={acMenu === 'mode'} onClick={() => setAcMenu(acMenu === 'mode' ? null : 'mode')}>Modo <small>{ac.state.mode ?? '—'}</small></button><button aria-label="Ventilação" disabled={!ac.state.online} aria-expanded={acMenu === 'fan'} onClick={() => setAcMenu(acMenu === 'fan' ? null : 'fan')}>Ventilação <small>{ac.state.fan ?? '—'}</small></button><Switch aria-label="Turbo" isSelected={ac.state.turbo ?? false} isDisabled={!ac.state.online} onChange={on => command({ kind: 'ac.turbo', deviceId: ac.id, on })}>Turbo</Switch></div>
