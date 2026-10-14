@@ -7,13 +7,22 @@ import { join } from 'node:path'
 import { SmartLifeCloud, TuyaService, confirms, type SmartLifeHome, type SmartLifeSession } from './tuya'
 import { applyLightGroups, suggestLightGroups, validateLightGroups } from './light-groups'
 import type { LightGroup, LightState } from '../shared/types'
+import { gangDefault, houseRooms, matchingRoom, normalized, roomName } from './house-defaults'
 
-const acRoomNames = ['Sala de estar', 'Office', 'Quarto']
 const offlineAc = { on: false, targetTemperature: 23, online: false }
 
 function acRoom(name: string): string | undefined {
-  const normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase()
-  return acRoomNames.find(room => normalized.includes(room.toLocaleLowerCase()))
+  return matchingRoom(name)
+}
+
+function deviceRoom(name: string, smartLifeRoom: string | undefined, home: SmartLifeHome): string {
+  const available = [...houseRooms, ...home.devices.flatMap(device => device.roomName?.trim() ? [roomName(device.roomName)] : [])]
+  return smartLifeRoom?.trim() ? roomName(smartLifeRoom) : matchingRoom(name, available) ?? 'Sem cômodo'
+}
+
+function deviceRoomId(home: SmartLifeHome, room: string, roomId?: string): string {
+  const matching = home.devices.find(device => device.roomId && device.roomName && normalized(roomName(device.roomName)) === normalized(room))
+  return `${home.id}:${roomId || matching?.roomId || room}`
 }
 
 function isDeviceCommand(value: unknown): value is DeviceCommand {
@@ -38,20 +47,26 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
   const rooms = new Map<string, Room>()
   for (const home of homes) for (const device of home.devices) {
     if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
-    const name = device.roomName || 'Sem cômodo'
-    const id = `${home.id}:${device.roomId || name}`
+    const name = deviceRoom(device.name, device.roomName, home)
+    const id = deviceRoomId(home, name, device.roomId)
     if (!rooms.has(id)) rooms.set(id, { id, name, lights: [], acs: [] })
+  }
+  for (const home of homes) for (const device of home.devices) for (const channel of device.category === 'dj' ? [{ dp: 1 }] : device.channels ?? []) {
+    const name = gangDefault(device.name, channel.dp, device.category)?.room
+    if (name && ![...rooms.values()].some(room => room.id.startsWith(`${home.id}:`) && normalized(room.name) === normalized(name))) {
+      rooms.set(`${home.id}:${name}`, { id: `${home.id}:${name}`, name, lights: [], acs: [] })
+    }
   }
   for (const ac of acs) {
     const name = acRoom(ac.name) || 'Sem cômodo'
-    if (![...rooms.values()].some(room => room.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    if (![...rooms.values()].some(room => normalized(room.name) === normalized(name))) {
       rooms.set(`lg:${name}`, { id: `lg:${name}`, name, lights: [], acs: [] })
     }
   }
   for (const home of homes) for (const device of home.devices) {
     if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
-    const name = device.roomName || 'Sem cômodo'
-    const id = `${home.id}:${device.roomId || name}`
+    const name = deviceRoom(device.name, device.roomName, home)
+    const id = deviceRoomId(home, name, device.roomId)
     const channels = device.category === 'dj' ? [] : device.channels?.length ? device.channels : [{ dp: 1, name: device.name }]
     const lights = device.category === 'dj'
       ? [{ id: device.id, name: device.name, state: { on: false, online: false } }]
@@ -59,17 +74,44 @@ function roomList(homes: SmartLifeHome[], acs: Pick<AirConditioner, 'id' | 'name
         name: /^Canal \d+$/i.test(channel.name) ? `${device.name} ${channel.dp}` : channel.name,
         switchOnly: true, state: { on: false, online: false } }))
     for (const light of lights) {
-      const quarto = name === 'Office' && light.id === `${device.id}::2` ? [...rooms.values()].find(room => room.name === 'Quarto') : undefined
-      const target = rooms.get(lightRoomIds[light.id]) ?? quarto ?? rooms.get(id)!
-      target.lights.push({ ...light, name: lightNames[light.id] ?? light.name })
+      const dp = light.id === device.id ? 1 : Number(light.id.slice(device.id.length + 2))
+      const fallback = gangDefault(device.name, dp, device.category)
+      const preferred = fallback?.room ? [...rooms.values()].find(room => room.id.startsWith(`${home.id}:`) && normalized(room.name) === normalized(fallback.room!)) : undefined
+      const target = rooms.get(lightRoomIds[light.id]) ?? preferred ?? rooms.get(id)!
+      target.lights.push({ ...light, name: lightNames[light.id] || fallback?.name || light.name })
     }
   }
   for (const ac of acs) {
     const name = acRoom(ac.name) || 'Sem cômodo'
-    const room = rooms.get(acRoomIds[ac.id]) || [...rooms.values()].find(item => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())!
+    const room = rooms.get(acRoomIds[ac.id]) || [...rooms.values()].find(item => normalized(item.name) === normalized(name))!
     room.acs.push({ ...ac, state: offlineAc })
   }
   return [...rooms.values()].filter(room => includeEmpty || room.lights.length || room.acs.length)
+}
+
+function fillHouseDefaults(setup: SavedSetup): { setup: SavedSetup; changed: boolean } {
+  const rooms = roomList(setup.homes, setup.acs, setup.acRoomIds, setup.lightRoomIds, setup.lightNames, true)
+  const locations = new Map(rooms.flatMap(room => room.lights.map(light => [light.id, room.id] as const)))
+  const lightRoomIds = { ...setup.lightRoomIds }
+  const lightNames = { ...setup.lightNames }
+  let changed = false
+  for (const home of setup.homes) for (const device of home.devices) {
+    if (!['dj', 'kg', 'cz'].includes(device.category) || !device.localKey) continue
+    const channels = device.category === 'dj' ? [] : device.channels?.length ? device.channels : [{ dp: 1, name: device.name }]
+    for (const channel of device.category === 'dj' ? [{ dp: 1, name: device.name }] : channels) {
+      const id = device.category === 'dj' || channel.dp === 1 ? device.id : `${device.id}::${channel.dp}`
+      const location = locations.get(id)
+      if (!location) continue
+      const gang = gangDefault(device.name, channel.dp, device.category)
+      if (gang?.name && !lightNames[id]?.trim()) { lightNames[id] = gang.name; changed = true }
+      if ((gang?.room || !device.roomName?.trim() && matchingRoom(device.name,
+        [...houseRooms, ...home.devices.flatMap(item => item.roomName?.trim() ? [roomName(item.roomName)] : [])])) && !lightRoomIds[id]?.trim()) {
+        lightRoomIds[id] = location
+        changed = true
+      }
+    }
+  }
+  return { setup: changed ? { ...setup, lightRoomIds, lightNames } : setup, changed }
 }
 
 export class HomeController {
@@ -90,7 +132,10 @@ export class HomeController {
     private readonly tuya = new TuyaService(),
     lg?: LgClient | null
   ) {
-    this.saved = store.load()
+    const loaded = store.load()
+    const defaults = loaded && fillHouseDefaults(loaded)
+    this.saved = defaults?.setup ?? null
+    if (defaults?.changed) store.save(defaults.setup)
     this.lgPat = this.saved?.lgPat || process.env.LG_PAT
     this.lgCountry = this.saved?.lgCountry || process.env.LG_COUNTRY || 'BR'
     this.lg = lg === undefined ? (this.lgPat ? new LgClient(this.lgPat, this.lgCountry) : null) : lg
@@ -129,6 +174,7 @@ export class HomeController {
     const [homes, acs] = await Promise.all([this.tuya.discover(this.session), this.lg.listAcs()])
     this.draft = { ...this.saved, homes, acs: acs.map(({ id, name }) => ({ id, name })),
       smartLifeSession: this.session ?? undefined, smartLifeUserCode: this.loginUserCode || this.saved?.smartLifeUserCode }
+    this.draft = fillHouseDefaults(this.draft).setup
     return roomList(this.draft.homes, this.draft.acs, this.draft.acRoomIds, this.draft.lightRoomIds, this.draft.lightNames)
   }
 
@@ -156,8 +202,8 @@ export class HomeController {
     for (const [deviceId, roomId] of Object.entries(mapping)) {
       if ((!validAcs.has(deviceId) && !validLights.has(deviceId)) || typeof roomId !== 'string' || !validRooms.has(roomId)) throw new Error('Invalid room mapping')
     }
-    this.draft.acRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validAcs.has(id))) as Record<string, string>
-    this.draft.lightRoomIds = Object.fromEntries(Object.entries(mapping).filter(([id]) => validLights.has(id))) as Record<string, string>
+    this.draft.acRoomIds = { ...this.draft.acRoomIds, ...Object.fromEntries(Object.entries(mapping).filter(([id]) => validAcs.has(id))) as Record<string, string> }
+    this.draft.lightRoomIds = { ...this.draft.lightRoomIds, ...Object.fromEntries(Object.entries(mapping).filter(([id]) => validLights.has(id))) as Record<string, string> }
     const assignedRooms = roomList(this.draft.homes, this.draft.acs, this.draft.acRoomIds, this.draft.lightRoomIds)
     this.draft.lightGroups = validateLightGroups(groups ?? suggestLightGroups(assignedRooms), assignedRooms)
     this.draft.groupLastState = {}
