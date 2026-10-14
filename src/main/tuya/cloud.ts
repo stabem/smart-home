@@ -137,7 +137,10 @@ function decrypt(value: string, secret: Buffer): unknown {
 export class SmartLifeCloud {
   private refreshInFlight: Promise<void> | null = null
   private readonly deviceHomes = new Map<string, string>()
-  private readonly statusCache = new Map<string, { status: Record<string, unknown>; expiresAt: number }>()
+  private readonly statusCache = new Map<string, { status: Record<string, unknown>; expiresAt: number; fetchedAt: number }>()
+  /** When a command was last sent per device: status fetched before that is stale for confirmation. */
+  private readonly commandAt = new Map<string, number>()
+  private readonly batchStartedAt = new Map<string, number>()
   private readonly onlineCache = new Map<string, boolean>()
   private readonly statusBatches = new Map<string, Promise<void>>()
   onSessionChanged?: () => void
@@ -163,7 +166,7 @@ export class SmartLifeCloud {
 
   private rememberStatus(id: string, status: unknown): void {
     const values = this.statusEntries(status)
-    if (values) this.statusCache.set(id, { status: values, expiresAt: Date.now() + 10_000 })
+    if (values) this.statusCache.set(id, { status: values, expiresAt: Date.now() + 10_000, fetchedAt: Date.now() })
   }
 
   private async publicRequest(path: string, method: 'GET' | 'POST'): Promise<Record<string, unknown>> {
@@ -244,12 +247,16 @@ export class SmartLifeCloud {
 
   async deviceStatus(session: SmartLifeSession, id: string): Promise<Record<string, unknown>> {
     const cached = this.statusCache.get(id)
-    if (cached && cached.expiresAt > Date.now()) return cached.status
+    const sentAt = this.commandAt.get(id) ?? 0
+    if (cached && cached.expiresAt > Date.now() && cached.fetchedAt >= sentAt) return cached.status
     if (this.queue.coolingDown()) throw new SmartLifeRateLimitError('Smart Life rate limited code=-9999999')
     const homeId = this.deviceHomes.get(id)
     if (!homeId) throw new Error('Smart Life home for device missing')
     let batch = this.statusBatches.get(homeId)
+    // A batch that started before this device's last command cannot confirm it: wait for it, then fetch again.
+    if (batch && (this.batchStartedAt.get(homeId) ?? 0) < sentAt) { await batch.catch(() => undefined); batch = this.statusBatches.get(homeId) }
     if (!batch) {
+      this.batchStartedAt.set(homeId, Date.now())
       batch = (async () => {
         const devices = await this.request(session, '/v1.0/m/life/ha/home/devices', { homeId })
         if (!Array.isArray(devices)) throw new Error('Invalid Smart Life batched status')
@@ -278,6 +285,7 @@ export class SmartLifeCloud {
       throw error
     }
     this.statusCache.delete(id)
+    this.commandAt.set(id, Date.now())
   }
 
   async listHomes(session: SmartLifeSession): Promise<SmartLifeHome[]> {

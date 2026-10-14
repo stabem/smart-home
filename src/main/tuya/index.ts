@@ -306,8 +306,18 @@ export class TuyaService {
         this.logFailure(`${selected.id} step=cloud-bundle`, device, error)
         for (const command of commands) await this.cloud.sendCommands(this.session, selected.id, [command])
       }
-      const state = await this.cloudState(selected.id, selected.dp)
-      return confirms(state, patch) ? state : { on: false, online: false }
+      let state = await this.cloudState(selected.id, selected.dp)
+      if (!confirms(state, patch)) {
+        // Tuya's status often lags the accepted command by a moment; read once more before judging.
+        await new Promise(resolve => setTimeout(resolve, 800))
+        state = await this.cloudState(selected.id, selected.dp)
+      }
+      if (confirms(state, patch)) return state
+      // Status could not be read at all: we do not know, so do not claim the change.
+      if (!state.online) return { on: false, online: false }
+      // Status reads fine but still lags the accepted command: report the requested state as unconfirmed, never as 'did not respond'.
+      console.info(`Tuya id=${selected.id} step=cloud-confirm result=lag`)
+      return { ...state, ...patch, online: true, viaCloud: true, unconfirmed: true }
     } catch (error) {
       this.logFailure(`${selected.id} step=cloud-set`, device, error)
       if (this.isOfflineError(error)) { this.offlineIds.add(selected.id); return this.offlineState() }

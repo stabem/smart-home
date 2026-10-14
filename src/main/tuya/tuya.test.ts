@@ -522,7 +522,9 @@ describe('typed light service', () => {
     const service = new TuyaService(cloud as unknown as SmartLifeCloud, { request: vi.fn() } as unknown as TuyaLanClient,
       vi.fn().mockResolvedValue(new Map()), vi.fn().mockResolvedValue([]))
     await service.restore([{ id: 'home', name: 'Casa', devices: [{ id: 'light-1', name: 'Lamp', category: 'dj', localKey: '', homeId: 'home' }] }], session)
-    expect(await service.setLight('light-1', { on: true, brightness: 50 })).toMatchObject({ online: false })
+    // Cloud accepted the bundle but status still lags after a retry: requested state, flagged unconfirmed (never 'offline').
+    expect(await service.setLight('light-1', { on: true, brightness: 50 })).toMatchObject({ on: true, brightness: 50, online: true, unconfirmed: true })
+    expect(cloud.deviceStatus.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(cloud.sendCommands.mock.calls.map(call => call[2])).toEqual([
       [{ code: 'switch_led', value: true }, { code: 'bright_value_v2', value: 505 }],
       [{ code: 'switch_led', value: true }], [{ code: 'bright_value_v2', value: 505 }]
@@ -596,6 +598,19 @@ describe('typed light service', () => {
     await service.discover(session)
     expect(await service.setLight('light-1', { on: true })).toEqual({ on: false, online: false })
     expect(cloud.sendCommands).toHaveBeenCalledOnce()
+  })
+  it('confirms a cloud command on the second status read when the first one lags', async () => {
+    const cloud = {
+      listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
+        { id: 'light-1', name: 'Lamp', category: 'dj', homeId: 'home' }
+      ] }]),
+      sendCommands: vi.fn().mockResolvedValue(undefined),
+      deviceStatus: vi.fn().mockResolvedValueOnce({ switch_led: false }).mockResolvedValueOnce({ switch_led: true })
+    }
+    const service = new TuyaService(cloud as unknown as SmartLifeCloud, {} as TuyaLanClient, vi.fn().mockResolvedValue(new Map()))
+    await service.discover(session)
+    expect(await service.setLight('light-1', { on: true })).toMatchObject({ on: true, online: true })
+    expect(cloud.deviceStatus).toHaveBeenCalledTimes(2)
   })
   it('ignores cloud WAN IP and uses a verified TCP probe candidate', async () => {
     const cloud = { listHomes: vi.fn().mockResolvedValue([{ id: 'home', name: 'Casa', devices: [
