@@ -1,5 +1,5 @@
 {
-  "promise": "No personal IP addresses remain in tests (RFC 5737 samples instead) and no Apple UI screenshots are tracked; behaviour unchanged.",
-  "scopePaths": ["src/main/tuya/tuya.test.ts", "docs/DESIGN.md", "test-results/design/reference/apple-control-center.png", "test-results/design/reference/macos-ventura-control-center.jpg", "test-results/design/control-center-side-by-side.png", ".graphhelm/keel-card.json"],
-  "proof": "sh ci/local-ci.sh && ! git grep -qE '177\.197|179\.119|179\.247' && echo PROOF_OK"
+  "promise": "MIT LICENSE, README and package.json license field; docs only, no behaviour change.",
+  "scopePaths": ["LICENSE", "README.md", "package.json", ".graphhelm/keel-card.json"],
+  "proof": "node -e \"require('./package.json').license==='MIT'||process.exit(1)\" && test -f LICENSE && echo PROOF_OK"
 }
